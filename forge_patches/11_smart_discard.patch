@@ -1,0 +1,207 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index d1ef4a6..12a27ef 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -98,6 +98,9 @@ public enum AiProps {
+     // already done its job (a blocker that dies anyway, no trample). See BlightChoice.
+     BLIGHT_ONLY_WHEN_SPENT ("false"),
+     MIN_COUNT_FOR_STORM_SPELLS ("0"),
++    // Discarding from our own hand (e.g. Seasoned Cryomancer): keep needed lands, pitch extra lands and spells
++    // we can't cast soon, keep threats/answers, prefer nonland when that stuns attackers. See SmartDiscard.
++    SMART_DISCARD ("false"),
+     STRIPMINE_MIN_LANDS_IN_HAND_TO_ACTIVATE ("1"),
+     STRIPMINE_MIN_LANDS_FOR_NO_TIMING_CHECK ("3"),
+     STRIPMINE_MIN_LANDS_OTB_FOR_NO_TEMPO_CHECK ("6"),
+diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+index e69258f..57ca651 100644
+--- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
++++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+@@ -763,6 +763,13 @@ public class PlayerControllerAi extends PlayerController {
+     @Override
+     public CardCollection chooseCardsToDiscardFrom(Player p, SpellAbility sa, CardCollection validCards, int min, int max, CardCollectionView visibleToChooser) {
+         if (p == player) {
++            // SMART_DISCARD: discard the least useful cards for the current board
++            if (SmartDiscard.isEnabled(player)) {
++                final CardCollection smart = SmartDiscard.choose(player, validCards, min, sa);
++                if (smart != null) {
++                    return smart;
++                }
++            }
+             return brains.getCardsToDiscard(min, max, validCards, sa);
+         }
+ 
+diff --git a/forge-ai/src/main/java/forge/ai/SmartDiscard.java b/forge-ai/src/main/java/forge/ai/SmartDiscard.java
+new file mode 100644
+index 0000000..2003784
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/SmartDiscard.java
+@@ -0,0 +1,169 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.EnumSet;
++import java.util.List;
++import java.util.Set;
++
++import forge.game.ability.ApiType;
++import forge.game.card.Card;
++import forge.game.card.CardCollection;
++import forge.game.card.CardCollectionView;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++import forge.game.zone.ZoneType;
++
++/**
++ * "Discard the least useful card - understand the board" (AI profile property SMART_DISCARD=true).
++ * Used when an effect makes us discard from our own hand (e.g. Seasoned Cryomancer:
++ * "draw two cards, then discard two cards").
++ *
++ * The user's rule (rule 6 in notes/how_we_play_control.md):
++ *   - Behind on lands: don't pitch the land. Pitch spells we can't cast soon.
++ *   - Flooded: pitch extra lands.
++ *   - (Cryomancer only stuns attackers if we discard NONLAND cards, so when the opponent
++ *     has creatures that can attack us, a spell is often the better discard.)
++ *
++ * Each card gets a "pitch score" (higher = discard first) and the highest are discarded.
++ * Off by default, so only decks whose profile turns it on are affected.
++ */
++public final class SmartDiscard {
++
++    private SmartDiscard() {
++    }
++
++    private static final int MIN_LANDS_WANTED = 4;   // a control deck always wants at least 4 lands
++    private static final int MAX_LANDS_WANTED = 6;   // more than 6 is flood for our curve
++
++    // effects that make a card a threat or an answer (worth keeping)
++    private static final Set<ApiType> ANSWERS = EnumSet.of(ApiType.Counter, ApiType.Destroy, ApiType.DestroyAll,
++            ApiType.ChangeZone, ApiType.ChangeZoneAll, ApiType.Sacrifice, ApiType.SacrificeAll,
++            ApiType.DealDamage, ApiType.DamageAll, ApiType.Tap, ApiType.TapAll);
++
++    // -----------------------------------------------------------------------
++    // 1. Is the rule switched on for this player's AI profile?
++    // -----------------------------------------------------------------------
++    public static boolean isEnabled(final Player ai) {
++        return ai.getController() instanceof PlayerControllerAi pc
++                && pc.getAi().getBoolProperty(AiProps.SMART_DISCARD);
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. Choose exactly `count` cards to discard from `valid` (null = let Forge decide)
++    // -----------------------------------------------------------------------
++    public static CardCollection choose(final Player ai, final CardCollectionView valid, final int count,
++                                        final SpellAbility sa) {
++        if (count <= 0 || valid.size() < count) {
++            return null;
++        }
++        final CardCollectionView hand = ai.getCardsIn(ZoneType.Hand);
++        final int landsInPlay = ai.getLandsInPlay().size();
++        final int landsWanted = landsWanted(hand);
++        // how many lands from our hand we still need to reach the lands we want
++        int landsStillNeeded = Math.max(0, landsWanted - landsInPlay);
++        final boolean stunBonus = rewardsNonlandDiscard(sa) && opponentCanAttack(ai);
++
++        // score every card (higher = discard first)
++        final List<Card> cards = new ArrayList<>();
++        valid.forEach(cards::add);
++        // lands we must keep: the first `landsStillNeeded` lands in hand
++        final List<Card> keptLands = new ArrayList<>();
++        for (final Card c : cards) {
++            if (c.isLand() && landsStillNeeded > 0) {
++                keptLands.add(c);
++                landsStillNeeded--;
++            }
++        }
++        final int manaSoon = landsInPlay + keptLands.size() + 1;   // roughly what we can cast in the next turns
++        cards.sort(Comparator.comparingInt((Card c) -> -pitchScore(c, keptLands, manaSoon, stunBonus, ai))
++                .thenComparingInt(Card::getCMC));
++
++        final CardCollection result = new CardCollection();
++        for (int i = 0; i < count; i++) {
++            result.add(cards.get(i));
++        }
++        return result;
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. The pitch score of one card (higher = more useless right now)
++    // -----------------------------------------------------------------------
++    private static int pitchScore(final Card c, final List<Card> keptLands, final int manaSoon,
++                                  final boolean stunBonus, final Player ai) {
++        if (c.isLand()) {
++            // behind on lands: never pitch a land we still need; flooded: extra lands go first
++            return keptLands.contains(c) ? -100 : 80;
++        }
++        int score = 0;
++        if (c.getCMC() > manaSoon) {
++            score += 40;   // we can't cast it any time soon
++        }
++        if (c.getType().isLegendary() && ai.isCardInPlay(c.getName())) {
++            score += 60;   // a second copy of a legend we already have (legend rule)
++        }
++        if (isKey(c)) {
++            score -= 50;   // a threat or an answer: keep it if we can
++        }
++        if (stunBonus) {
++            score += 30;   // a nonland discard also stuns their attackers (Cryomancer)
++        }
++        return score;
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. How many lands we want in play: the most expensive spell in hand,
++    //    but at least 4 and at most 6
++    // -----------------------------------------------------------------------
++    private static int landsWanted(final CardCollectionView hand) {
++        int maxCmc = 0;
++        for (final Card c : hand) {
++            if (!c.isLand()) {
++                maxCmc = Math.max(maxCmc, c.getCMC());
++            }
++        }
++        return Math.max(MIN_LANDS_WANTED, Math.min(MAX_LANDS_WANTED, maxCmc));
++    }
++
++    // -----------------------------------------------------------------------
++    // 5. Does this discard reward nonland cards? (an "if you discarded a nonland
++    //    card" follow-up, like Seasoned Cryomancer's stun)
++    // -----------------------------------------------------------------------
++    private static boolean rewardsNonlandDiscard(final SpellAbility sa) {
++        for (SpellAbility part = sa; part != null; part = part.getSubAbility()) {
++            if (part.getApi() == ApiType.ImmediateTrigger
++                    && part.getParamOrDefault("ConditionPresent", "").contains("nonLand")) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    // does an opponent have a creature that could attack us next turn?
++    private static boolean opponentCanAttack(final Player ai) {
++        for (final Player opp : ai.getOpponents()) {
++            if (!opp.getCreaturesInPlay().isEmpty()) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    // a win condition (creature, planeswalker) or an answer (removal, counter, tapper, wipe)
++    private static boolean isKey(final Card c) {
++        if (c.isCreature() || c.isPlaneswalker()) {
++            return true;
++        }
++        for (final SpellAbility sa : c.getSpellAbilities()) {
++            for (SpellAbility part = sa; part != null; part = part.getSubAbility()) {
++                if (part.getApi() != null && ANSWERS.contains(part.getApi())) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++}
