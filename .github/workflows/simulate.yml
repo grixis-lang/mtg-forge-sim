@@ -212,6 +212,33 @@ jobs:
               > /dev/null 2>&1 || { echo "Applying our sideboard plan failed (details hidden)"; exit 1; }
             python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder sideboarded forge_decks --standard \
               > /dev/null 2>&1 || { echo "$HIDDEN"; exit 1; }
+
+            # Opponents sideboard too. Our plans.json says which style our deck is
+            # ("_style": "control", "midrange" or "aggro"), and each opponent's
+            # plans/opponents/<deck>.json says what it boards in and out against that style.
+            # The style is never printed, so the log doesn't describe our deck.
+            STYLE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("_style",""))' "plans/$OURS.json")
+            if [ -z "$STYLE" ]; then
+              echo "Our plans.json has no _style: opponents play their main decks in games 2-3"
+            elif ! [[ "$STYLE" =~ ^[a-z_]+$ ]]; then
+              echo "_style in our plans.json must be lowercase letters only"; exit 1
+            else
+              echo "$STYLE" > forge_decks/_our_style.txt
+              mkdir -p opp_sideboarded
+              for plan in plans/opponents/*.json; do
+                [ -f "$plan" ] || continue
+                opp=$(basename "$plan" .json)
+                [ -f "decks/$opp.txt" ] || continue       # plan for a deck that isn't an opponent
+                # Output hidden: the copies' names include the style. Run it locally to debug.
+                python3 scripts/apply_sideboard.py "decks/$opp.txt" "$plan" opp_sideboarded \
+                  > /dev/null 2>&1 || { echo "Opponent sideboard plan for $opp has a problem (run apply_sideboard.py on it locally)"; exit 1; }
+              done
+              if ls opp_sideboarded/*.txt >/dev/null 2>&1; then
+                python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder opp_sideboarded forge_decks --standard \
+                  > /dev/null 2>&1 || { echo "An opponent's sideboarded deck didn't convert (run convert_decks.py locally)"; exit 1; }
+              fi
+              echo "Opponent sideboard plans built: $(ls opp_sideboarded 2>/dev/null | wc -l)"
+            fi
           fi
 
       - name: List the opponents (every meta deck in decks/)
@@ -326,6 +353,12 @@ jobs:
           DECK="$OURS"
           SB="${OURS}__sb__${OPP}"
           if [ "$SIDEBOARD" = "true" ] && [ -f "forge_decks/$SB.dck" ]; then DECK="$SB"; fi
+          # The opponent plays its copy sideboarded against our deck's style, if it has one
+          OPPDECK="$OPP"
+          if [ "$SIDEBOARD" = "true" ] && [ -f forge_decks/_our_style.txt ]; then
+            STYLE=$(cat forge_decks/_our_style.txt)
+            if [ -f "forge_decks/${OPP}__sb__${STYLE}.dck" ]; then OPPDECK="${OPP}__sb__${STYLE}"; fi
+          fi
           # This job's share of the games (e.g. 50 games over 4 shards = 13+13+12+12)
           MINE=$(( G / S + ( I <= G % S ? 1 : 0 ) ))
           echo "Shard $I of $S plays $MINE games"
@@ -347,6 +380,7 @@ jobs:
             --ai "$AI" \
             --game-timeout "$TIMEOUT" \
             --opponent "$OPP" \
+            --opponent-deck "$OPPDECK" \
             --games "$MINE" \
             --out "out/results/$TAG.json" \
             "${EXTRA[@]}"

@@ -32,8 +32,10 @@ def build_table(results: list[dict]) -> str:
         f"# Forge AI results: {ours}",
         "",
         f"Run finished {now}. Draws count as half a win. "
-        "Forge's AI is weaker than a human and does not sideboard, "
-        "so read these as rough signals, not exact win rates.",
+        "Forge's AI is weaker than a human and can't choose its own sideboard cards "
+        "(sideboarding uses our written plans), so read these as rough signals, "
+        "not exact win rates. Note \"they sideboarded\" = the opponent played its "
+        "sideboard plan against us too.",
         "",
         "| Opponent | W | L | D | Games | Win % | Note |",
         "|---|---:|---:|---:|---:|---:|---|",
@@ -53,6 +55,8 @@ def build_table(results: list[dict]) -> str:
             note = f"only {games} of {r['games_requested']} games finished"
         elif pct < WARN_BELOW:
             note = "weak matchup"
+        if r.get("opponent_sideboarded"):
+            note = f"{note}, they sideboarded" if note else "they sideboarded"
         lines.append(f"| {r['opponent']} | {r['wins']} | {r['losses']} | {r['draws']} "
                      f"| {games} | {pct:.0f}% | {note} |")
         total_w, total_l, total_d = total_w + r["wins"], total_l + r["losses"], total_d + r["draws"]

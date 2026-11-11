@@ -70,8 +70,9 @@ def main() -> None:
         f"# Best-of-three estimate: {deck}",
         "",
         "Game 1 uses the main deck; games 2-3 use the sideboarded deck from "
-        f"`plans/{deck}.json`. Opponents play their main decks in all games "
-        "(their sideboard plans are unknown). Forge AI results: rough signals.",
+        f"`plans/{deck}.json`. Opponents with a plan in `plans/opponents/` "
+        "sideboard against us in games 2-3 (marked \"they sideboarded\" in the "
+        "sideboarded results); the rest play their main decks. Forge AI results: rough signals.",
         "",
         "| Opponent | Game 1 | After sideboard | Change | Match win (Bo3) |",
         "|---|---:|---:|---:|---:|",

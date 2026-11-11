@@ -69,6 +69,9 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--report-as", default=None,
                    help="name to show in results (e.g. our deck's name when playing "
                         "its sideboarded copy); defaults to --ours")
+    p.add_argument("--opponent-deck", default=None,
+                   help="the opponent's .dck to actually load (e.g. its sideboarded copy "
+                        "'<opponent>__sb__<style>'); results still use --opponent as the name")
     return p.parse_args()
 
 
@@ -81,7 +84,8 @@ def forge_command(args: argparse.Namespace, games: int, memory: str) -> list[str
         "java", f"-Xmx{memory}",
         "-jar", str(Path(args.jar).resolve()),
         "sim",                                   # Forge's simulation mode
-        "-d", f"{args.ours}.dck", f"{args.opponent}.dck",
+        # the opponent's sideboarded copy is loaded when given, else its main deck
+        "-d", f"{args.ours}.dck", f"{args.opponent_deck or args.opponent}.dck",
         "-D", decks_dir,                         # folder the .dck files are in
         "-n", str(games),                        # number of games
         "-c", str(args.game_timeout),            # per-game time limit
@@ -222,6 +226,8 @@ def main() -> None:
     result.update({
         "ours": args.report_as or args.ours,
         "opponent": args.opponent,
+        # True when the opponent played a sideboarded copy (games 2-3 against us)
+        "opponent_sideboarded": bool(args.opponent_deck and args.opponent_deck != args.opponent),
         "games_requested": args.games,
         "games_played": played,
         "ai": args.ai,
