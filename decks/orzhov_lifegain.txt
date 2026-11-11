@@ -17,3 +17,16 @@
 4 Multiversal Passage
 4 Plains
 4 Starting Town
+
+Sideboard
+2 Duress
+1 Ghost Vacuum
+2 Seam Rip
+1 Deep-Cavern Bat
+1 Lunar Convocation
+2 Shattered Acolyte
+1 Strategic Betrayal
+1 Phyrexian Arena
+2 Pyrrhic Strike
+1 Space-Time Anomaly
+1 Vicious Rivalry

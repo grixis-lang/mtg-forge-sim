@@ -24,3 +24,14 @@
 4 Island
 1 Meticulous Archive
 5 Plains
+
+Sideboard
+2 Authority of the Consuls
+2 No More Lies
+2 Rest in Peace
+2 Torpor Orb
+2 Voice of Victory
+1 Pinnacle Starcage
+2 Day of Judgment
+1 Astelli Reclaimer
+1 Krang, Master Mind

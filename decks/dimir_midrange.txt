@@ -20,3 +20,15 @@
 2 Soulstone Sanctuary
 3 Swamp
 4 Watery Grave
+
+Sideboard
+1 Annul
+3 Duress
+1 Requiting Hex
+2 Day of Black Sun
+1 Disdainful Stroke
+2 Flashfreeze
+2 Strategic Betrayal
+1 Wan Shi Tong, Librarian
+1 Tishana's Tidebinder
+1 Vren, the Relentless

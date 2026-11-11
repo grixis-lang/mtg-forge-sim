@@ -1,0 +1,26 @@
+4 Llanowar Elves
+4 Sazh's Chocobo
+3 Dyadrine, Synthesis Amalgam
+3 Mossborn Hydra
+4 Icetill Explorer
+4 Mightform Harmonizer
+4 Esper Origins
+4 Erode
+4 Earthbender Ascension
+2 Sapling Nursery
+3 Ba Sing Se
+3 Escape Tunnel
+4 Fabled Passage
+8 Forest
+2 Hushwood Verge
+2 Plains
+2 Temple Garden
+
+Sideboard
+4 Doorkeeper Thrull
+2 Rest in Peace
+3 Sheltered by Ghosts
+1 Torpor Orb
+2 Clarion Conqueror
+2 Surrak, Elusive Hunter
+1 Gigantic Big Bear

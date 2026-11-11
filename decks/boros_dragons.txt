@@ -17,3 +17,14 @@
 1 Plains
 4 Sacred Foundry
 4 Sunbillow Verge
+
+Sideboard
+2 Seam Rip
+2 Boros Charm
+2 Get Lost
+3 Rest in Peace
+1 Sheltered by Ghosts
+1 Solitary Cell
+2 Split Up
+1 The Legend of Roku
+1 Dragonhawk, Fate's Tempest

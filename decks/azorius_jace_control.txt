@@ -18,3 +18,13 @@
 4 Petrified Hamlet
 3 Plains
 2 Theorist's Sanctum
+
+Sideboard
+2 Cavern of Souls
+4 Doorkeeper Thrull
+1 Flashfreeze
+1 Rest in Peace
+2 King T'Challa
+2 Captain Marvel, Earth's Protector
+2 Emeritus of Ideation
+1 Ultima

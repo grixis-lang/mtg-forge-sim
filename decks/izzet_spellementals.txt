@@ -16,3 +16,12 @@
 4 Spirebluff Canal
 4 Steam Vents
 2 Stormcarved Coast
+
+Sideboard
+2 Annul
+2 Fire Magic
+2 Spell Pierce
+2 Spell Snare
+2 Disdainful Stroke
+3 Colorstorm Stallion
+2 Sunspine Lynx

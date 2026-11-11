@@ -16,3 +16,12 @@
 4 Sacred Foundry
 4 Sunbillow Verge
 4 The Lonely Mountain
+
+Sideboard
+2 Bofur, Reliable Guardian
+2 Seam Rip
+2 Chainsaw
+2 Rest in Peace
+4 Shattered Acolyte
+2 Sheltered by Ghosts
+1 Anzrag's Rampage
