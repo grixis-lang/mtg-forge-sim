@@ -34,10 +34,10 @@ index 3feda83..ad9a5a2 100644
      FLAT_MC_MAX_PLAYOUT_PLAYS("6"),
 diff --git a/forge-ai/src/main/java/forge/ai/LifeOrDiscard.java b/forge-ai/src/main/java/forge/ai/LifeOrDiscard.java
 new file mode 100644
-index 0000000..081f3c3
+index 0000000..1dfc111
 --- /dev/null
 +++ b/forge-ai/src/main/java/forge/ai/LifeOrDiscard.java
-@@ -0,0 +1,208 @@
+@@ -0,0 +1,233 @@
 +package forge.ai;
 +
 +// ---------------------------------------------------------------------------
@@ -54,7 +54,9 @@ index 0000000..081f3c3
 +import forge.game.card.CardCollection;
 +import forge.game.cost.Cost;
 +import forge.game.cost.CostDiscard;
++import forge.game.cost.CostPart;
 +import forge.game.cost.CostPayLife;
++import forge.game.keyword.Keyword;
 +import forge.game.keyword.KeywordInterface;
 +import forge.game.player.Player;
 +import forge.game.spellability.SpellAbility;
@@ -71,6 +73,8 @@ index 0000000..081f3c3
 + *   3. If only key cards are left: pay the life, but ONLY if we survive the turn
 + *      (life after paying > what the opponent's creatures can hit us for).
 + *   4. If paying would put us in lethal range: discard the least valuable card instead.
++ * Ward: if the target has "Ward - pay N life" (e.g. Amalia Benavides Aguirre), that life is
++ * paid on top, so it is counted in every "how much life will we have left" check.
 + *
 + * Forge treats the two choices as two versions of the spell. The AI asks "will I pay this
 + * cost?" for each version (SpellAbilityAi.willPayCosts); with this rule on, only the
@@ -127,7 +131,8 @@ index 0000000..081f3c3
 +        if (lifeCost < 0) {
 +            return null;
 +        }
-+        final int lifeAfter = ai.getLife() - lifeCost;
++        // life after paying this spell's cost AND any "ward - pay life" on its target
++        final int lifeAfter = ai.getLife() - lifeCost - wardLifeCost(ai, sa);
 +        final boolean survives = lifeAfter > damageWeCouldTake(ai, sa);
 +        final boolean early = ai.getTurn() <= EARLY_TURNS;
 +
@@ -202,6 +207,26 @@ index 0000000..081f3c3
 +            }
 +        }
 +        return Math.max(0, total);
++    }
++
++    // -----------------------------------------------------------------------
++    // 5b. Life we'll also pay to targets' ward ("Ward - Pay 3 life"). Forge checks that
++    //     cost on its own; here it is added so the total life loss is what we judge.
++    //     (Mana ward needs nothing here: Forge already counts it as extra mana needed.)
++    // -----------------------------------------------------------------------
++    private static int wardLifeCost(final Player ai, final SpellAbility sa) {
++        int total = 0;
++        for (final GameEntity t : sa.getTargets().getTargetEntities()) {
++            if (t instanceof Card c && c.isInPlay() && c.hasKeyword(Keyword.WARD)
++                    && c.getController() != null && c.getController().isOpponentOf(ai)) {
++                for (final CostPart part : ComputerUtilCard.getTotalWardCost(c).getCostParts()) {
++                    if (part instanceof CostPayLife payLife) {
++                        total += payLife.getAbilityAmount(sa);
++                    }
++                }
++            }
++        }
++        return total;
 +    }
 +
 +    // -----------------------------------------------------------------------
