@@ -156,7 +156,7 @@ def main() -> None:
                     help="the ONE meta deck to test against (a file name in the public decks/ folder); "
                          "user rule: one opponent per test while tuning")
     ap.add_argument("--games", type=int, default=100)   # one opponent: 100 games = about ±10 points
-    ap.add_argument("--shards", type=int, default=4)   # 4 machines play the test's games at the same time
+    ap.add_argument("--shards", type=int, default=8)   # 8 machines play the test's games at the same time
     ap.add_argument("--private", default="../mtg-private-list", help="local clone of MTG-Private-List")
     args = ap.parse_args()
 

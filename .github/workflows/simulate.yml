@@ -62,8 +62,8 @@ on:
         default: ""
         required: false
       shards:
-        description: "Split the matchup into this many machines that play at the same time (4 = 4 machines, 25 games each for 100 games)"
-        default: "4"
+        description: "Split the matchup into this many machines that play at the same time (8 = 8 machines, 12-13 games each for 100 games)"
+        default: "8"
         required: true
 
 permissions:
@@ -289,11 +289,11 @@ jobs:
     strategy:
       fail-fast: false            # one broken matchup shouldn't stop the others
       # Rule (user, 2026-11-11): one test at a time, one opponent per test.
-      # The test's games are split over up to 4 machines that play at the same time
+      # The test's games are split over up to 8 machines that play at the same time
       # (user, 2026-11-11). Each machine is its own 4-CPU computer running 2 Forge
       # copies, so the AI thinks exactly as hard as before - only the test finishes sooner.
       # Free: public repo, standard runners (limit is 20 jobs at once).
-      max-parallel: 4
+      max-parallel: 8
       matrix:
         opponent: ${{ fromJSON(needs.build.outputs.opponents) }}
         shard: ${{ fromJSON(needs.build.outputs.shards) }}
