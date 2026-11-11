@@ -1,0 +1,16 @@
+{
+  "control": {
+    "_why": "Discard and Deep-Cavern Bat take our answers, Phyrexian Arena gives card draw, Strategic Betrayal hits graveyard recursion. Cuts 1-drops that die to wipes and one Erode.",
+    "in": {
+      "Duress": 2,
+      "Deep-Cavern Bat": 1,
+      "Phyrexian Arena": 1,
+      "Strategic Betrayal": 1
+    },
+    "out": {
+      "Aunt May": 2,
+      "Liliana the Faultless": 2,
+      "Erode": 1
+    }
+  }
+}

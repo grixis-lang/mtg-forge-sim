@@ -1,0 +1,20 @@
+{
+  "control": {
+    "_why": "Mirror-style: creature removal and wipes have few targets. Brings in flash threats, Cavern of Souls so creatures can't be countered, and Rest in Peace against graveyard recursion.",
+    "in": {
+      "Cavern of Souls": 2,
+      "King T'Challa": 2,
+      "Captain Marvel, Earth's Protector": 2,
+      "Emeritus of Ideation": 2,
+      "Rest in Peace": 1
+    },
+    "out": {
+      "Day of Judgment": 2,
+      "Erode": 2,
+      "Get Lost": 2,
+      "Seam Rip": 1,
+      "Island": 1,
+      "Plains": 1
+    }
+  }
+}

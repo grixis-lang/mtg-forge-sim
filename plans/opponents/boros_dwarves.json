@@ -1,0 +1,13 @@
+{
+  "control": {
+    "_why": "Shattered Acolyte kills artifacts/enchantments, Sheltered by Ghosts exiles a permanent and protects a creature. Cuts creature removal (Chainsaw) and Basilisk Collar.",
+    "in": {
+      "Shattered Acolyte": 2,
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Chainsaw": 2,
+      "Basilisk Collar": 2
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "control": {
+    "_why": "Boros Charm gives reach and saves the board from wipes, Get Lost answers planeswalkers and enchantments, Roku and Dragonhawk give card advantage. Cuts cheap creature removal and lifegain.",
+    "in": {
+      "Boros Charm": 2,
+      "Get Lost": 2,
+      "The Legend of Roku": 1,
+      "Dragonhawk, Fate's Tempest": 1
+    },
+    "out": {
+      "Erode": 2,
+      "Burst Lightning": 2,
+      "Magda, the Hoardmaster": 1,
+      "Twinmaw Stormbrood": 1
+    }
+  }
+}

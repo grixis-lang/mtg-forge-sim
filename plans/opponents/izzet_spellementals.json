@@ -1,0 +1,15 @@
+{
+  "control": {
+    "_why": "More counters (Spell Pierce, Disdainful Stroke) and a hasty threat with ward. Cuts creature burn and some cantrips.",
+    "in": {
+      "Spell Pierce": 2,
+      "Disdainful Stroke": 2,
+      "Colorstorm Stallion": 2
+    },
+    "out": {
+      "Impractical Joke": 2,
+      "Burst Lightning": 2,
+      "Sleight of Hand": 2
+    }
+  }
+}

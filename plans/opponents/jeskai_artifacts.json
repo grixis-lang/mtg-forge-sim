@@ -1,0 +1,18 @@
+{
+  "control": {
+    "_why": "Voice of Victory stops counterspells on their turn, No More Lies fights back, Krang refills, Rest in Peace stops graveyard recursion. Cuts creature removal and Authority.",
+    "in": {
+      "No More Lies": 2,
+      "Voice of Victory": 2,
+      "Krang, Master Mind": 1,
+      "Rest in Peace": 2
+    },
+    "out": {
+      "Day of Judgment": 1,
+      "Erode": 1,
+      "Spring-Loaded Sawblades": 2,
+      "Authority of the Consuls": 2,
+      "Braided Net": 1
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "control": {
+    "_why": "Duress, Disdainful Stroke and Annul fight our spells; a 2nd Wan Shi Tong adds card draw. Cuts cheap creature removal that has few targets.",
+    "in": {
+      "Duress": 3,
+      "Disdainful Stroke": 1,
+      "Annul": 1,
+      "Wan Shi Tong, Librarian": 1
+    },
+    "out": {
+      "Requiting Hex": 3,
+      "Shoot the Sheriff": 2,
+      "Floodpits Drowner": 1
+    }
+  }
+}
