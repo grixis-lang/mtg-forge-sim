@@ -41,8 +41,8 @@ on:
         type: boolean
         default: false
       opponent:
-        description: "Opponent(s) to play: a file name in decks/, several separated by commas, or all"
-        default: "all"
+        description: "ONE opponent to play: a file name in decks/ (user rule: one opponent per test while tuning)"
+        default: ""
         required: true
       analytics:
         description: "Keep full game logs and report card performance and game length"
@@ -251,8 +251,13 @@ jobs:
           test -f "candidates/$OURS.txt" || { echo "Our deck file is missing"; exit 1; }
           # Shards: each matchup is split into this many jobs (1, 2, 3 ...)
           python3 -c 'import json,sys; n=int(sys.argv[1]); assert 1<=n<=20, "shards must be 1-20"; print("shards="+json.dumps(list(range(1,n+1))))' "$SHARDS" >> "$GITHUB_OUTPUT"
+          # Rule (user, 2026-11-11): while tuning, each test plays ONE chosen opponent.
+          # "all" and comma lists are refused, so a test can't quietly run every matchup.
+          if [ -z "$OPPONENT" ] || [ "$OPPONENT" = "all" ] || [[ "$OPPONENT" == *,* ]]; then
+            echo "::error::Pick ONE opponent (a file name in decks/). Rule: one opponent per test while tuning."; exit 1
+          fi
           if [ "$OPPONENT" != "all" ]; then
-            # one opponent, or several separated by commas
+            # one opponent
             LIST=$(python3 -c 'import json,sys; print(json.dumps([o.strip() for o in sys.argv[1].split(",") if o.strip()]))' "$OPPONENT")
             for o in $(echo "$LIST" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
               test -f "decks/$o.txt" || { echo "No decks/$o.txt"; exit 1; }

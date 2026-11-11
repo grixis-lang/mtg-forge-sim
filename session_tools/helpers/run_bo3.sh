@@ -1,4 +1,9 @@
 #!/bin/bash
+# RETIRED (user rules 2026-11-11): this script started several GitHub runs at the same
+# time, which breaks 'one job at a time'. Use run_seq.sh (one opponent, one test after
+# another) instead. The old code is kept below for reference but never runs.
+echo "Retired: starts runs side by side. Use session_tools/helpers/run_seq.sh <games> <opponent> <profile> <deck>..." >&2
+exit 1
 # run_bo3.sh <deck> <opponent> <games> <ai> [priorities true/false]
 # Dispatches the game-1 run (main deck) and the sideboarded run vs one opponent,
 # both with analytics, then waits until both finish.

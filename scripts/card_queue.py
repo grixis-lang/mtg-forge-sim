@@ -87,11 +87,11 @@ def build_variant(base: str, flex: list[str], card: str) -> str:
 # ---------------------------------------------------------------------------
 # 3. Run one test on GitHub and wait for it
 # ---------------------------------------------------------------------------
-def run_test(deck: str, games: int, shards: int, profile: str) -> int:
+def run_test(deck: str, games: int, shards: int, profile: str, opponent: str) -> int:
     before = json.loads(sh(["gh", "api", f"repos/{REPO}/actions/runs?per_page=1"]))["workflow_runs"][0]["id"]
     sh(["gh", "api", "-X", "POST", f"repos/{REPO}/actions/workflows/simulate.yml/dispatches",
         "-f", "ref=main", "-f", f"inputs[games]={games}", "-f", f"inputs[ours]={deck}",
-        "-F", "inputs[sideboard]=false", "-f", "inputs[opponent]=all", "-F", "inputs[analytics]=true",
+        "-F", "inputs[sideboard]=false", "-f", f"inputs[opponent]={opponent}", "-F", "inputs[analytics]=true",
         "-f", "inputs[ai]=Hardest", "-F", "inputs[priorities]=true", "-f", f"inputs[shards]={shards}",
         "-f", f"inputs[our_profile]={profile}"])
     run_id = None
@@ -124,10 +124,10 @@ def read_table(path: Path) -> dict[str, tuple[int, int, int]]:
             for line in path.read_text().splitlines() if (m := ROW.match(line))}
 
 
-def card_stats(results: Path, deck: str, profile: str, card: str) -> tuple[int, float]:
-    """Games the card was cast in, and win % in those games, over all matchups."""
+def card_stats(results: Path, deck: str, profile: str, card: str, opponent: str) -> tuple[int, float]:
+    """Games the card was cast in, and win % in those games, against the tested opponent."""
     n = w = 0.0
-    for f in (results / "analytics").glob(f"{deck}_Hardest_prio_{profile}_vs_*.md"):
+    for f in (results / "analytics").glob(f"{deck}_Hardest_prio_{profile}_vs_{opponent}.md"):
         sec = f.read_text().split("## Card performance")[1].split("## Game length")[0]
         for line in sec.splitlines():
             c = [x.strip() for x in line.strip("|").split("|")]
@@ -152,7 +152,10 @@ def main() -> None:
     ap.add_argument("--flex", nargs=4, required=True, help='the 4 main-deck lines to replace, e.g. "1 Card A"')
     ap.add_argument("--profile", required=True,
                     help="our AI profile name (a file in the private repo's engine/ai_profiles/)")
-    ap.add_argument("--games", type=int, default=50)
+    ap.add_argument("--opponent", required=True,
+                    help="the ONE meta deck to test against (a file name in the public decks/ folder); "
+                         "user rule: one opponent per test while tuning")
+    ap.add_argument("--games", type=int, default=100)   # one opponent: 100 games = about ±10 points
     ap.add_argument("--shards", type=int, default=1)   # one job at a time anyway (max-parallel 1)
     ap.add_argument("--private", default="../mtg-private-list", help="local clone of MTG-Private-List")
     args = ap.parse_args()
@@ -160,6 +163,9 @@ def main() -> None:
     # Safety: the deck name becomes a folder name, so allow only simple names
     if not re.fullmatch(r"[a-z0-9_]+", args.baseline):
         sys.exit("baseline must be a simple deck name like my_deck")
+    if not re.fullmatch(r"[a-z0-9_]+", args.opponent) or not Path(f"decks/{args.opponent}.txt").is_file():
+        sys.exit("--opponent must be ONE file name from the public repo's decks/ folder (without .txt)")
+    vs = f"_vs_{args.opponent}"                          # single-opponent runs save their tables with this suffix
 
     private = Path(args.private).resolve()
     home = private / "decks" / args.baseline            # this deck's one folder
@@ -168,17 +174,22 @@ def main() -> None:
     sh(["git", "pull", "-q"], check=False, cwd=private)
 
     base_text = (home / "deck.txt").read_text()
-    base_table = read_table(results / f"{args.baseline}_Hardest_prio_{args.profile}.md")
+    base_file = results / f"{args.baseline}_Hardest_prio_{args.profile}{vs}.md"
+    if not base_file.is_file():
+        sys.exit(f"No baseline result vs {args.opponent} yet: run the baseline deck against it first "
+                 f"(it should create {base_file.name})")
+    base_table = read_table(base_file)
     opps = sorted(base_table)
-    out = results / f"{args.baseline}_card_tests.md"
+    out = results / f"{args.baseline}_card_tests{vs}.md"          # one table per opponent
+    margin = round(100 / args.games ** 0.5)
     base_overall = pct(tuple(map(sum, zip(*base_table.values()))))
     if not out.exists():
         out.write_text(
             f"# Card tests for {args.baseline}\n\n"
             f"Each candidate goes in as **4 copies** in place of: {', '.join(args.flex)}. "
-            f"Game 1, {args.games} games per matchup, Hardest AI, AI helpers on, our profile {args.profile}. "
+            f"Game 1 vs **{args.opponent}** only, {args.games} games, Hardest AI, AI helpers on, our profile {args.profile}. "
             f"Baseline (0 copies): **{base_overall:.0f}%**. "
-            "All 8 decks combined is about ±5 points by luck.\n\n"
+            f"One opponent at {args.games} games is about ±{margin} points by luck.\n\n"
             "| Card | Overall | Change | Cast in | Win % when cast | " + " | ".join(o.split("_")[0] for o in opps) + " |\n"
             "|---|---:|---:|---:|---:|" + "---:|" * len(opps) + "\n")
 
@@ -196,14 +207,14 @@ def main() -> None:
         # 5c. Save it privately, then run the test
         push_private(private, f"Card test: 4 {card} in {args.baseline}")
         print(f"[{time.strftime('%H:%M')}] testing {card} ...", flush=True)
-        run_test(name, args.games, args.shards, args.profile)
+        run_test(name, args.games, args.shards, args.profile, args.opponent)
         time.sleep(10)
         sh(["git", "pull", "-q"], cwd=private)          # the workflow saved the results there
 
         # 5d. Add the result row and save it privately
-        table = read_table(results / f"{name}_Hardest_prio_{args.profile}.md")
+        table = read_table(results / f"{name}_Hardest_prio_{args.profile}{vs}.md")
         overall = pct(tuple(map(sum, zip(*table.values()))))
-        n, wr = card_stats(results, name, args.profile, card)
+        n, wr = card_stats(results, name, args.profile, card, args.opponent)
         cells = " | ".join(f"{pct(table[o]):.0f}%" if o in table else "-" for o in opps)
         with out.open("a") as fh:
             fh.write(f"| {card} | {overall:.0f}% | {overall - base_overall:+.0f} | {n} | {wr:.0f}% | {cells} |\n")

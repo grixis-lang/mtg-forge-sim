@@ -18,7 +18,7 @@ use no plan minutes. (The private repo has no workflows on purpose.)
 |---|---|
 | `.github/workflows/simulate.yml` | The test workflow (build Forge, play games, save results privately) |
 | `decks/` | The meta opponents (public meta lists) |
-| `new_decks/` | More meta lists (75 cards each), not yet used as opponents. Move a file into `decks/` to add it to `opponent=all` |
+| `new_decks/` | More meta lists (75 cards each), not yet used as opponents. Move a file into `decks/` to make it an opponent |
 | `scripts/` | Python scripts: run games, summarize, analyze logs, AI audit, card queue |
 | `forge_patches/` | Our fixes to Forge's AI, applied before each build (see its README) |
 | `plans/ai_priorities.json` | Which opponent cards the AI should target first |
@@ -31,7 +31,7 @@ use no plan minutes. (The private repo has no workflows on purpose.)
    - **ours**: the deck's name in the private repo (a folder in `decks/`, or an experiment file name)
    - **games**: games per matchup
    - **sideboard**: tick to play post-sideboard games using the deck's `plans.json`
-   - **opponent**: one deck from `decks/`, several separated by commas, or `all`
+   - **opponent**: ONE deck from `decks/` (rule: one opponent per test while tuning; `all` and comma lists are refused)
    - **analytics**: tick for card performance, game length and turning-point reports
    - **ai**: `Default` (fast), `Hard` or `Hardest` (thinks ahead)
    - **priorities**: tick to use `plans/ai_priorities.json` and the private repo's card fixes (`engine/card_overrides/`)
