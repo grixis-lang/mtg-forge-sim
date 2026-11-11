@@ -64,6 +64,8 @@ from pathlib import Path
 # Regular expressions for the log lines we care about
 TURN = re.compile(r"^Turn: Turn (\d+) \((.+)\)$")
 MULLIGAN_KEPT = re.compile(r"^Mulligan: (.+) has kept a hand of (\d+) cards")
+# "Mulligan: Ai(1)-deck opening hand: Card A ; Card B ; ..." (from our Forge patch 03)
+OPENING_HAND = re.compile(r"^Mulligan: (.+?) opening hand: (.*)$")
 LAND = re.compile(r"^Land: (.+?) played (.+?) \((\d+)\)")
 CAST = re.compile(r"^Add To Stack: (.+?) cast (.+?)(?: targeting (.*))?$")
 # Activated abilities and triggers: "... activated Scavenging Ooze targeting [Fabled Passage (41)]"
@@ -186,6 +188,8 @@ def new_game() -> dict:
         "opp_hits": [],           # (round, opponent source, damage) combat hits on us
         "owner": {},              # card id -> "us"/"opp" (from attacks, blocks, lands)
         "our_names": set(), "opp_names": set(),  # card names each side cast
+        "opening": [],            # our kept opening hand (card names), if the log has it
+        "our_land_names": set(),  # names of lands we played (to tell lands apart in the opening hand)
     }
 
 
@@ -250,6 +254,12 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["our_turn_index"] += 1                # our 1st, 2nd, 3rd turn...
             continue
 
+        m = OPENING_HAND.match(line)
+        if m:
+            if is_ours(m.group(1)):
+                g["opening"] = [c.strip() for c in m.group(2).split(" ; ") if c.strip()]
+            continue
+
         m = MULLIGAN_KEPT.match(line)
         if m and is_ours(m.group(1)):
             g["kept"] = int(m.group(2))
@@ -261,6 +271,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
             g["land_count"][side(m.group(1))] += 1
             if is_ours(m.group(1)):
                 g["lands"][g["our_turn_index"]] += 1
+                g["our_land_names"].add(m.group(2).strip())
             continue
 
         m = ABILITY.match(line)
@@ -469,6 +480,64 @@ def ahead_on(snap: tuple) -> list[str]:
 # ---------------------------------------------------------------------------
 # 4. Build the Markdown report
 # ---------------------------------------------------------------------------
+def opening_hand_report(games: list[dict]) -> list[str]:
+    """Win rate by what was in our kept opening hand: number of lands, and each card."""
+    with_hand = [g for g in games if g["opening"]]
+    if not with_hand:
+        return []
+    land_names = set().union(*(g["our_land_names"] for g in games))
+    out = ["", "## Opening hands", "",
+           f"Our kept opening hand in {len(with_hand)} games (after any mulligan). "
+           "Win rate by how many lands it had, and by the cards in it.", "",
+           "| Lands in opening hand | Games | Win % |", "|---|---:|---:|"]
+    # 6a. by number of lands
+    buckets = defaultdict(list)
+    for g in with_hand:
+        n = sum(1 for c in g["opening"] if c in land_names)
+        buckets["0-1" if n <= 1 else "5+" if n >= 5 else str(n)].append(g)
+    for key in ("0-1", "2", "3", "4", "5+"):
+        gs = buckets.get(key, [])
+        if gs:
+            out.append(f"| {key} | {len(gs)} | {pct(sum(score(g) for g in gs), len(gs))} |")
+    # 6b. by card (non-lands, most common first)
+    out += ["", "| Card in opening hand | Games | Win % with it | Win % without |", "|---|---:|---:|---:|"]
+    counts = Counter(c for g in with_hand for c in set(g["opening"]) if c not in land_names)
+    for card, n in counts.most_common(25):
+        have = [g for g in with_hand if card in g["opening"]]
+        lack = [g for g in with_hand if card not in g["opening"]]
+        out.append(f"| {card} | {n} | {pct(sum(score(g) for g in have), len(have))} | "
+                   f"{pct(sum(score(g) for g in lack), len(lack))} |")
+    return out
+
+
+def cast_by_turn_report(games: list[dict], last_turn: int = 6) -> list[str]:
+    """How many games each of our cards was cast on our turns 1..last_turn, and how
+    often we cast nothing at all. A spell cast on the opponent's turn counts for
+    our turn before it (e.g. a counterspell on their turn 2 counts as our turn 2)."""
+    reached = {t: sum(1 for g in games if g["our_turn_index"] >= t) for t in range(1, last_turn + 1)}
+    by_card = defaultdict(Counter)
+    did_something = Counter()
+    for g in games:
+        turns_with_cast = set()
+        for card, t in g["cast"]:
+            if 1 <= t <= last_turn:
+                by_card[card][t] += 1
+                turns_with_cast.add(t)
+        for t in turns_with_cast:
+            did_something[t] += 1
+    head = " | ".join(f"T{t}" for t in range(1, last_turn + 1))
+    out = ["", "## Cards cast by turn (early game)", "",
+           "Number of games where we cast the card on our turn N (or on the opponent's turn right after). "
+           "The last row shows how often we cast nothing at all on that turn.", "",
+           f"| Card | {head} |", "|---|" + "---:|" * last_turn]
+    early = sorted(by_card.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))
+    for card, cnt in early:
+        out.append(f"| {card} | " + " | ".join(str(cnt[t]) if cnt[t] else "" for t in range(1, last_turn + 1)) + " |")
+    out.append("| **Nothing cast** | " + " | ".join(
+        f"{reached[t] - did_something[t]} of {reached[t]}" for t in range(1, last_turn + 1)) + " |")
+    return out
+
+
 def report(games: list[dict], ours: str, opponent: str,
            kinds: dict[str, tuple[str, int]] | None = None,
            wipes: set[str] | None = None,
@@ -826,6 +895,12 @@ def report(games: list[dict], ours: str, opponent: str,
                       ("Kept 7 cards", [g for g in games if g["kept"] >= 7]),
                       ("Mulliganed", [g for g in games if g["kept"] < 7])):
         out.append(f"- {label}: {len(gs)} games, win rate {pct(sum(score(g) for g in gs), len(gs))}")
+
+    # --- Opening hands (needs Forge patch 03, which logs the kept hand) -------
+    out += opening_hand_report(games)
+
+    # --- Cards cast by turn (what we actually did early) ---------------------
+    out += cast_by_turn_report(games)
 
     # --- Biggest threats -----------------------------------------------------
     dmg = Counter()

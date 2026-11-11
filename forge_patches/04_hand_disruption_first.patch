@@ -1,0 +1,213 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index 0fd6cee9..da00b112 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -2121,6 +2121,16 @@ public class AiController {
+             }
+         }
+ 
++        // PRIORITIZE_HAND_DISRUPTION: on our own main phase, cast hand disruption before anything else
++        if (game.getStack().isEmpty() && game.getPhaseHandler().isPlayerTurn(player)
++                && game.getPhaseHandler().getPhase().isMain()) {
++            final SpellAbility disrupt = HandDisruption.firstPlayable(player, saList,
++                    sa -> !hasFailedToCast(sa) && canPlayAndPayFor(sa) == AiPlayDecision.WillPlay);
++            if (disrupt != null) {
++                return disrupt;
++            }
++        }
++
+         SpellAbility chosenSa;
+         lastFlatMcResult = null;
+         if (reactiveMode != null) {
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index 6ede1a98..ddd0f264 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -162,6 +162,9 @@ public enum AiProps {
+     FLAT_MC_RISK_WEIGHT("100"),
+     FLAT_MC_OVERRIDE_MAJORITY("50"),
+     FLAT_MC_ENABLED("true"),
++    // Control decks: cast hand disruption (Duress, Soul Search...) on our own turn before holding mana for
++    // instants, and only hold mana when no hand disruption can be cast. See HandDisruption.
++    PRIORITIZE_HAND_DISRUPTION("false"),
+     // Sampling efficiency and deck-agnostic valuation. Setting PRUNING/CATEGORY_HOLD/ADAPTIVE_PLAYOUT to false and
+     // EXTRA_ROUNDS to 0 reproduces the original flat Monte Carlo, which is what the A/B benchmark uses as baseline.
+     FLAT_MC_EXTRA_ROUNDS("2"),
+diff --git a/forge-ai/src/main/java/forge/ai/HandDisruption.java b/forge-ai/src/main/java/forge/ai/HandDisruption.java
+new file mode 100644
+index 00000000..0d3abe15
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/HandDisruption.java
+@@ -0,0 +1,119 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.List;
++import java.util.function.Predicate;
++
++import forge.game.ability.ApiType;
++import forge.game.card.Card;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++import forge.game.zone.ZoneType;
++
++/**
++ * "Hand disruption first" for control decks (AI profile property PRIORITIZE_HAND_DISRUPTION=true).
++ *
++ * The rule, as a player would say it:
++ *   1. If a hand-disruption spell (Duress, Soul Search, ...) can be cast on our own turn, cast it:
++ *      turn 1 Duress, turn 2 Soul Search, always.
++ *   2. Only keep mana open for instants (counterspells, instant removal) when there is no
++ *      hand-disruption spell left to cast.
++ *
++ * Without this, a profile that likes holding mana (high FLAT_MC_HOLD_MANA_WEIGHT) often skips the
++ * sorcery to keep a counterspell up, and then has nothing worth countering: the turn is wasted.
++ *
++ * Off by default, so only decks whose profile turns it on are affected.
++ */
++public final class HandDisruption {
++
++    private HandDisruption() {
++    }
++
++    // -----------------------------------------------------------------------
++    // 1. Is the rule switched on for this player's AI profile?
++    // -----------------------------------------------------------------------
++    public static boolean isEnabled(final Player player) {
++        if (!(player.getController() instanceof PlayerControllerAi pc)) {
++            return false;
++        }
++        return pc.getAi().getBoolProperty(AiProps.PRIORITIZE_HAND_DISRUPTION);
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. What counts as hand disruption: a spell that makes an opponent
++    //    discard, or that takes a card from an opponent's hand
++    //    (e.g. Duress = Discard, Soul Search = ChangeZone from Hand to Exile).
++    // -----------------------------------------------------------------------
++    public static boolean isHandDisruption(final SpellAbility sa) {
++        if (sa == null || !sa.isSpell() || sa.getApi() == null) {
++            return false;
++        }
++        final String targets = sa.getParamOrDefault("ValidTgts", "");
++        final boolean aimsAtOpponent = targets.contains("Opponent")
++                || "Opponent".equals(sa.getParamOrDefault("Defined", ""));
++        if (!aimsAtOpponent) {
++            return false;
++        }
++        if (sa.getApi() == ApiType.Discard) {
++            return true;
++        }
++        return sa.getApi() == ApiType.ChangeZone
++                && "Hand".equals(sa.getParamOrDefault("Origin", ""))
++                && !"Hand".equals(sa.getParamOrDefault("Destination", ""));
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. Is there anything to take? (an empty opposing hand = nothing to gain)
++    // -----------------------------------------------------------------------
++    private static boolean opponentHasCards(final Player player) {
++        for (final Player opp : player.getOpponents()) {
++            if (!opp.getCardsIn(ZoneType.Hand).isEmpty()) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. Used by the "hold mana?" check: true when a hand-disruption spell in
++    //    hand could be cast with the mana we have right now (so holding mana
++    //    for an instant is not allowed this turn).
++    // -----------------------------------------------------------------------
++    public static boolean hasCastableInHand(final Player player, final int availableMana) {
++        if (!isEnabled(player) || !opponentHasCards(player)) {
++            return false;
++        }
++        for (final Card c : player.getCardsIn(ZoneType.Hand)) {
++            if (c.isLand() || c.getCMC() > availableMana) {
++                continue;
++            }
++            for (final SpellAbility sa : c.getSpellAbilities()) {
++                if (isHandDisruption(sa)) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
++    // -----------------------------------------------------------------------
++    // 5. Used on our own main phase with an empty stack: the first
++    //    hand-disruption spell the AI is willing (and able) to cast, or null.
++    //    "approved" is the AI's normal can-play-and-pay check, so targets
++    //    and costs are set up exactly as for any other play.
++    // -----------------------------------------------------------------------
++    public static SpellAbility firstPlayable(final Player player, final List<SpellAbility> plays,
++                                             final Predicate<SpellAbility> approved) {
++        if (!isEnabled(player) || !opponentHasCards(player)) {
++            return null;
++        }
++        for (final SpellAbility sa : plays) {
++            if (isHandDisruption(sa) && approved.test(sa)) {
++                return sa;
++            }
++        }
++        return null;
++    }
++}
+diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+index 2f3237c8..aeb8d8a2 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+@@ -412,8 +412,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
+         }
+ 
+         // don't use fetching to top of library/graveyard before main2
++        // (hand disruption such as Soul Search may go in main 1 when PRIORITIZE_HAND_DISRUPTION is on)
+         if (ai.getGame().getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
+-                && !sa.hasParam("ActivationPhases")) {
++                && !sa.hasParam("ActivationPhases")
++                && !(HandDisruption.isEnabled(ai) && HandDisruption.isHandDisruption(sa))) {
+             if (!destination.equals("Battlefield") && !destination.equals("Hand")) {
+                 return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
+             }
+diff --git a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
+index f1b70865..030403bb 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
+@@ -116,7 +116,8 @@ public class DiscardAi extends SpellAbilityAi {
+ 
+         // Don't use discard abilities before main 2 if possible
+         if (ai.getGame().getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
+-                && !sa.hasParam("ActivationPhases") && !aiLogic.startsWith("AnyPhase")) {
++                && !sa.hasParam("ActivationPhases") && !aiLogic.startsWith("AnyPhase")
++                && !(HandDisruption.isEnabled(ai) && HandDisruption.isHandDisruption(sa))) {
+             return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
+         }
+ 
+diff --git a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
+index b568aa40..16e000fc 100644
+--- a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
++++ b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
+@@ -5,6 +5,7 @@ import forge.ai.AiProps;
+ import forge.ai.ComputerUtil;
+ import forge.ai.ComputerUtilCombat;
+ import forge.ai.ComputerUtilMana;
++import forge.ai.HandDisruption;
+ import forge.ai.PlayerControllerAi;
+ import forge.ai.simulation.GameStateEvaluator.Score;
+ import forge.game.Game;
+@@ -1548,6 +1549,10 @@ public final class FlatMonteCarloPicker {
+             return false;
+         }
+         final int mana = ComputerUtilMana.getAvailableManaEstimate(player, true);
++        // PRIORITIZE_HAND_DISRUPTION: cast the Duress / Soul Search first, hold mana only when there is none
++        if (HandDisruption.hasCastableInHand(player, mana)) {
++            return false;
++        }
+         for (final Card c : hand) {
+             if (isInstantSpeedSpell(c) && c.getCMC() <= mana) {
+                 return true;

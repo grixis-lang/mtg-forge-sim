@@ -1,0 +1,21 @@
+diff --git a/forge-game/src/main/java/forge/game/mulligan/AbstractMulligan.java b/forge-game/src/main/java/forge/game/mulligan/AbstractMulligan.java
+index 4f50baee..c0bd2f58 100644
+--- a/forge-game/src/main/java/forge/game/mulligan/AbstractMulligan.java
++++ b/forge-game/src/main/java/forge/game/mulligan/AbstractMulligan.java
+@@ -63,5 +63,15 @@ public abstract class AbstractMulligan {
+ 
+     public void afterMulligan() {
+         player.getGame().fireEvent(new GameEventAddLog(GameLogEntryType.MULLIGAN, Localizer.getInstance().getMessage("lblPlayerKeepNCardsHand", player.getName(), String.valueOf(player.getZone(ZoneType.Hand).size()))));
++        // Simulation reports: also log the cards in the kept opening hand (names separated by " ; ",
++        // because some card names contain commas). Read by mtg-forge-sim's analyze_logs.py.
++        StringBuilder hand = new StringBuilder();
++        for (Card c : player.getZone(ZoneType.Hand).getCards()) {
++            if (hand.length() > 0) {
++                hand.append(" ; ");
++            }
++            hand.append(c.getName());
++        }
++        player.getGame().fireEvent(new GameEventAddLog(GameLogEntryType.MULLIGAN, player.getName() + " opening hand: " + hand));
+     }
+ }
+\ No newline at end of file
