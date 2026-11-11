@@ -1,0 +1,391 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index da00b11..7661ba8 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -190,6 +190,13 @@ public class AiController {
+         return memory;
+     }
+ 
++    // Cards seen in opponents' hands; unlike getCardMemory() it is not cleared at end of turn
++    private final OpponentHandMemory opponentHandMemory = new OpponentHandMemory();
++
++    public OpponentHandMemory getOpponentHandMemory() {
++        return opponentHandMemory;
++    }
++
+     private StormSolver stormSolver;
+ 
+     /** Whether Flat Monte Carlo is switched on for this player. */
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index ddd0f26..bd7af75 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -165,6 +165,9 @@ public enum AiProps {
+     // Control decks: cast hand disruption (Duress, Soul Search...) on our own turn before holding mana for
+     // instants, and only hold mana when no hand disruption can be cast. See HandDisruption.
+     PRIORITIZE_HAND_DISRUPTION("false"),
++    // Remember cards seen in an opponent's hand (Duress, Soul Search, reveals) until they leave it, use them in
++    // look-ahead rollouts, and take the card our own hand can't answer. See OpponentHandMemory.
++    REMEMBER_OPPONENT_HAND("false"),
+     // Sampling efficiency and deck-agnostic valuation. Setting PRUNING/CATEGORY_HOLD/ADAPTIVE_PLAYOUT to false and
+     // EXTRA_ROUNDS to 0 reproduces the original flat Monte Carlo, which is what the A/B benchmark uses as baseline.
+     FLAT_MC_EXTRA_ROUNDS("2"),
+diff --git a/forge-ai/src/main/java/forge/ai/HandDisruption.java b/forge-ai/src/main/java/forge/ai/HandDisruption.java
+index 0d3abe1..92096cd 100644
+--- a/forge-ai/src/main/java/forge/ai/HandDisruption.java
++++ b/forge-ai/src/main/java/forge/ai/HandDisruption.java
+@@ -90,7 +90,7 @@ public final class HandDisruption {
+                 continue;
+             }
+             for (final SpellAbility sa : c.getSpellAbilities()) {
+-                if (isHandDisruption(sa)) {
++                if (isHandDisruption(sa) && !OpponentHandMemory.pointless(player, sa)) {
+                     return true;
+                 }
+             }
+diff --git a/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java b/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java
+new file mode 100644
+index 0000000..b209582
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java
+@@ -0,0 +1,199 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.EnumSet;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++
++import forge.game.ability.ApiType;
++import forge.game.card.Card;
++import forge.game.card.CardCollection;
++import forge.game.card.CardCollectionView;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++import forge.game.spellability.TargetRestrictions;
++import forge.game.zone.ZoneType;
++
++/**
++ * "Remember what Duress showed" (AI profile property REMEMBER_OPPONENT_HAND=true).
++ *
++ * How a control player uses a look at the opponent's hand:
++ *   1. Remember it. Those cards stay known until they leave the opponent's hand.
++ *      (Forge's own REVEALED_CARDS memory is wiped at the end of every turn,
++ *      and the look-ahead rollouts ignored it, so the AI forgot right away.)
++ *   2. Plan with it. The look-ahead games keep the known cards in the
++ *      opponent's hand instead of reshuffling them, so "hold up a counter?",
++ *      "save the removal?" and "safe to tap out?" are judged against what the
++ *      opponent really holds. (Used by simulation.HiddenInfoShuffler.)
++ *   3. Compare hands when choosing what to take: take the card that OUR hand
++ *      can't answer. If we already hold a counterspell or removal that handles
++ *      a card, it's less urgent to take it.
++ *   4. Don't waste disruption: if we know the whole opposing hand and nothing
++ *      in it can be taken, don't cast another Duress.
++ *
++ * Off by default, so only decks whose profile turns it on are affected.
++ */
++public final class OpponentHandMemory {
++
++    // card ids we have seen in each opponent's hand (key: opponent's player id)
++    private final Map<Integer, Set<Integer>> seen = new ConcurrentHashMap<>();
++
++    // effects that count as "an answer" to a creature or permanent once it is on the battlefield
++    private static final Set<ApiType> REMOVAL = EnumSet.of(ApiType.Destroy, ApiType.DestroyAll,
++            ApiType.ChangeZone, ApiType.ChangeZoneAll, ApiType.Sacrifice, ApiType.SacrificeAll,
++            ApiType.DealDamage, ApiType.DamageAll);
++
++    // -----------------------------------------------------------------------
++    // 1. Getting the memory of an AI player (null when the setting is off)
++    // -----------------------------------------------------------------------
++    public static OpponentHandMemory of(final Player ai) {
++        if (ai == null || !(ai.getController() instanceof PlayerControllerAi pc)) {
++            return null;
++        }
++        final AiController brains = pc.getAi();
++        return brains.getBoolProperty(AiProps.REMEMBER_OPPONENT_HAND) ? brains.getOpponentHandMemory() : null;
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. Remembering: called whenever cards are revealed to (or looked at by)
++    //    the AI. Only cards that are in an opponent's hand right now are kept.
++    // -----------------------------------------------------------------------
++    public void note(final Player ai, final Iterable<Card> cards) {
++        if (cards == null) {
++            return;
++        }
++        for (final Card c : cards) {
++            if (c == null || !c.isInZone(ZoneType.Hand)) {
++                continue;
++            }
++            final Player owner = c.getOwner();
++            if (owner != null && owner.isOpponentOf(ai)) {
++                seen.computeIfAbsent(owner.getId(), k -> ConcurrentHashMap.newKeySet()).add(c.getId());
++            }
++        }
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. What we know: the remembered cards still in that opponent's hand.
++    //    (Cards that were cast or discarded since then drop out by themselves.)
++    // -----------------------------------------------------------------------
++    public boolean knows(final Card c) {
++        if (c == null || c.getOwner() == null || !c.isInZone(ZoneType.Hand)) {
++            return false;
++        }
++        final Set<Integer> ids = seen.get(c.getOwner().getId());
++        return ids != null && ids.contains(c.getId());
++    }
++
++    public CardCollection known(final Player opp) {
++        final CardCollection result = new CardCollection();
++        for (final Card c : opp.getCardsIn(ZoneType.Hand)) {
++            if (knows(c)) {
++                result.add(c);
++            }
++        }
++        return result;
++    }
++
++    public boolean knowsWholeHand(final Player opp) {
++        final CardCollectionView hand = opp.getCardsIn(ZoneType.Hand);
++        return !hand.isEmpty() && known(opp).size() == hand.size();
++    }
++
++    // Static shortcut used by the look-ahead shuffler: does this AI know this card?
++    public static boolean aiKnows(final Player ai, final Card c) {
++        final OpponentHandMemory mem = of(ai);
++        return mem != null && mem.knows(c);
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. Comparing hands: can something in OUR hand answer this card later?
++    //    - a counterspell that is allowed to target it (when it is cast), or
++    //    - removal that is allowed to target it (once it is on the battlefield).
++    // -----------------------------------------------------------------------
++    public static boolean ourHandAnswers(final Player ai, final Card threat) {
++        for (final Card ours : ai.getCardsIn(ZoneType.Hand)) {
++            for (final SpellAbility sa : ours.getSpellAbilities()) {
++                if (sa.getApi() == null) {
++                    continue;
++                }
++                final TargetRestrictions tr = sa.getTargetRestrictions();
++                if (sa.getApi() == ApiType.Counter) {
++                    // e.g. No More Lies "Card" (any spell); Negate "Card.nonCreature"
++                    if (tr == null || threat.isValid(tr.getValidTgts(), ai, ours, sa)) {
++                        return true;
++                    }
++                } else if (REMOVAL.contains(sa.getApi()) && threat.isPermanent()) {
++                    if (tr == null) {
++                        // untargeted ("destroy all creatures"): only counts against creatures
++                        if (threat.isCreature() && (sa.getApi() == ApiType.DestroyAll || sa.getApi() == ApiType.DamageAll)) {
++                            return true;
++                        }
++                    } else if (!ai.equals(threat.getOwner()) && threat.isValid(tr.getValidTgts(), ai, ours, sa)) {
++                        return true;
++                    }
++                }
++            }
++        }
++        return false;
++    }
++
++    // -----------------------------------------------------------------------
++    // 5. Choosing what to take with Duress / Soul Search: the most dangerous
++    //    card that our own hand can NOT answer. Rough danger score:
++    //    mana value, plus a bonus by card type (planeswalkers and creatures
++    //    first), minus a lot if we already hold an answer to it.
++    // -----------------------------------------------------------------------
++    public static Card bestToTake(final Player ai, final Iterable<Card> options) {
++        Card best = null;
++        int bestScore = Integer.MIN_VALUE;
++        for (final Card c : options) {
++            int score = c.getCMC() * 10;
++            if (c.isPlaneswalker()) {
++                score += 40;
++            } else if (c.isCreature()) {
++                score += 25;
++            } else if (c.isEnchantment() || c.isArtifact()) {
++                score += 20;   // e.g. equipment and engines that stick around
++            } else {
++                score += 10;   // instants and sorceries
++            }
++            if (ourHandAnswers(ai, c)) {
++                score -= 45;   // we can deal with it later: take something else
++            }
++            if (score > bestScore) {
++                bestScore = score;
++                best = c;
++            }
++        }
++        return best;
++    }
++
++    // -----------------------------------------------------------------------
++    // 6. "Is it worth it?": a hand-disruption spell is pointless when we know
++    //    every card in the opponent's hand and none of them can be taken
++    //    (e.g. Duress against a hand of only creatures and lands).
++    // -----------------------------------------------------------------------
++    public static boolean pointless(final Player ai, final SpellAbility sa) {
++        final OpponentHandMemory mem = of(ai);
++        if (mem == null) {
++            return false;
++        }
++        final String valid = sa.hasParam("DiscardValid") ? sa.getParam("DiscardValid")
++                : sa.getParamOrDefault("ChangeType", "Card");
++        for (final Player opp : ai.getOpponents()) {
++            if (!mem.knowsWholeHand(opp)) {
++                return false;   // there may be something we haven't seen
++            }
++            for (final Card c : opp.getCardsIn(ZoneType.Hand)) {
++                if (c.isValid(valid.split(","), ai, sa.getHostCard(), sa)) {
++                    return false;   // there is something to take
++                }
++            }
++        }
++        return true;
++    }
++}
+diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+index da17732..e69258f 100644
+--- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
++++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+@@ -578,12 +578,21 @@ public class PlayerControllerAi extends PlayerController {
+         for (Card c : cards) {
+             AiCardMemory.rememberCard(player, c, AiCardMemory.MemorySet.REVEALED_CARDS);
+         }
++        final OpponentHandMemory mem = OpponentHandMemory.of(player);
++        if (mem != null) {
++            mem.note(player, cards);
++        }
+     }
+ 
+     @Override
+     public void reveal(List<CardView> cards, ZoneType zone, PlayerView owner, String messagePrefix, boolean addSuffix) {
++        final OpponentHandMemory mem = OpponentHandMemory.of(player);
+         for (CardView cv : cards) {
+-            AiCardMemory.rememberCard(player, player.getGame().findByView(cv), AiCardMemory.MemorySet.REVEALED_CARDS);
++            final Card c = player.getGame().findByView(cv);
++            AiCardMemory.rememberCard(player, c, AiCardMemory.MemorySet.REVEALED_CARDS);
++            if (mem != null && c != null) {
++                mem.note(player, java.util.List.of(c));
++            }
+         }
+     }
+ 
+@@ -759,6 +768,18 @@ public class PlayerControllerAi extends PlayerController {
+ 
+         boolean isTargetFriendly = !p.isOpponentOf(player);
+ 
++        // REMEMBER_OPPONENT_HAND: remember the revealed hand, and take the card our own hand can't answer
++        final OpponentHandMemory mem = OpponentHandMemory.of(player);
++        if (mem != null && !isTargetFriendly) {
++            mem.note(player, visibleToChooser);
++            if (min == 1 && max == 1 && !validCards.isEmpty()) {
++                final Card pick = OpponentHandMemory.bestToTake(player, validCards);
++                if (pick != null) {
++                    return new CardCollection(pick);
++                }
++            }
++        }
++
+         return isTargetFriendly
+                ? ComputerUtil.getCardsToDiscardFromFriend(player, p, sa, validCards, min, max)
+                : ComputerUtil.getCardsToDiscardFromOpponent(player, p, sa, validCards, min, max);
+@@ -1828,6 +1849,16 @@ public class PlayerControllerAi extends PlayerController {
+         if (delayedReveal != null) {
+             reveal(delayedReveal);
+         }
++        // REMEMBER_OPPONENT_HAND: taking a card from an opponent's hand (e.g. Soul Search)
++        final OpponentHandMemory mem = OpponentHandMemory.of(player);
++        if (mem != null && origin != null && origin.contains(ZoneType.Hand) && !fetchList.isEmpty()
++                && fetchList.allMatch(c -> c.getOwner() != null && c.getOwner().isOpponentOf(player))) {
++            mem.note(player, fetchList);
++            final Card pick = OpponentHandMemory.bestToTake(player, fetchList);
++            if (pick != null) {
++                return pick;
++            }
++        }
+         return brains.chooseCardToHiddenOriginChangeZone(destination, origin, sa, fetchList, player, decider);
+     }
+ 
+diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+index aeb8d8a..008f58f 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+@@ -285,6 +285,11 @@ public class ChangeZoneAi extends SpellAbilityAi {
+         }
+         final String destination = sa.getParam("Destination");
+ 
++        // REMEMBER_OPPONENT_HAND: e.g. Soul Search into a known hand with nothing to take
++        if (HandDisruption.isHandDisruption(sa) && OpponentHandMemory.pointless(ai, sa)) {
++            return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
++        }
++
+         if (sa.isNinjutsu()) {
+             if (!source.ignoreLegendRule() && ai.isCardInPlay(source.getName())) {
+                 return new AiAbilityDecision(0, AiPlayDecision.WouldDestroyLegend);
+diff --git a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
+index 030403b..9b3d18b 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
+@@ -44,6 +44,11 @@ public class DiscardAi extends SpellAbilityAi {
+             return SpecialCardAi.VolrathsShapeshifter.consider(ai, sa);
+         }
+ 
++        // REMEMBER_OPPONENT_HAND: we know their whole hand and there is nothing this spell can take
++        if (OpponentHandMemory.pointless(ai, sa)) {
++            return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
++        }
++
+         final boolean humanHasHand = !ai.getWeakestOpponent().getCardsIn(ZoneType.Hand).isEmpty();
+ 
+         if (sa.usesTargeting()) {
+diff --git a/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java b/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
+index 2f35648..0e5a6dd 100644
+--- a/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
++++ b/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
+@@ -53,8 +53,8 @@ public final class HiddenInfoShuffler {
+             final List<Card> handCards = new ArrayList<>(hand.getCards());
+             final List<Card> libraryCards = new ArrayList<>(library.getCards());
+ 
+-            final List<Integer> hiddenHandSlots = hiddenSlots(handCards, copier, viewer);
+-            final List<Integer> hiddenLibrarySlots = hiddenSlots(libraryCards, copier, viewer);
++            final List<Integer> hiddenHandSlots = hiddenSlots(handCards, copier, viewer, viewerOrig);
++            final List<Integer> hiddenLibrarySlots = hiddenSlots(libraryCards, copier, viewer, viewerOrig);
+ 
+             final List<Card> pool = new ArrayList<>(hiddenHandSlots.size() + hiddenLibrarySlots.size());
+             for (final int slot : hiddenHandSlots) {
+@@ -83,21 +83,27 @@ public final class HiddenInfoShuffler {
+         }
+     }
+ 
+-    private static List<Integer> hiddenSlots(final List<Card> cards, final GameCopier copier, final PlayerView viewer) {
++    private static List<Integer> hiddenSlots(final List<Card> cards, final GameCopier copier, final PlayerView viewer,
++                                             final Player viewerOrig) {
+         final List<Integer> slots = new ArrayList<>();
+         for (int i = 0; i < cards.size(); i++) {
+-            if (isHiddenFrom(cards.get(i), copier, viewer)) {
++            if (isHiddenFrom(cards.get(i), copier, viewer, viewerOrig)) {
+                 slots.add(i);
+             }
+         }
+         return slots;
+     }
+ 
+-    private static boolean isHiddenFrom(final Card simCard, final GameCopier copier, final PlayerView viewer) {
++    private static boolean isHiddenFrom(final Card simCard, final GameCopier copier, final PlayerView viewer,
++                                        final Player viewerOrig) {
+         final GameObject orig = copier.reverseFind(simCard);
+         if (!(orig instanceof Card)) {
+             return false; // cannot tell what the AI knows about it, so never move it
+         }
++        // REMEMBER_OPPONENT_HAND: a card we saw in the opponent's hand (and that is still there) is known
++        if (forge.ai.OpponentHandMemory.aiKnows(viewerOrig, (Card) orig)) {
++            return false;
++        }
+         return !((Card) orig).getView().canBeShownTo(viewer);
+     }
+ }

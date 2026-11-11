@@ -10,6 +10,7 @@ the cache key includes a hash of these files.
 | `02_behold_any_card.patch` | **Behold** costs: the AI only looked for *creatures* to behold, so with 2+ valid non-creature cards (e.g. two Jaces for Countersculpt) it couldn't pay. Now any valid card works (behold-and-exile gives up the least valuable one). |
 | `03_log_opening_hand.patch` | Logs each player's kept opening hand ("Mulligan: <player> opening hand: A ; B ; ...") so `analyze_logs.py` can report win rate by opening hand. Logging only, no change to play. |
 | `04_hand_disruption_first.patch` | New AI profile setting `PRIORITIZE_HAND_DISRUPTION` (off by default). When on: cast hand disruption (Duress, Soul Search...) on our own turn before anything else, also in main phase 1, and only hold mana for instants when no hand disruption can be cast. |
+| `05_remember_opponent_hand.patch` | New AI profile setting `REMEMBER_OPPONENT_HAND` (off by default). When on: cards seen in an opponent's hand (Duress, Soul Search, any reveal) are remembered until they leave it; the look-ahead keeps them in the opponent's hand instead of reshuffling them; Duress / Soul Search take the card our own hand can't answer; and no more Duress into a known hand with nothing to take. |
 
 ## If a patch stops applying
 
