@@ -1,0 +1,494 @@
+# Simulate our deck against every meta deck with Forge's AI.
+#
+# Start it from GitHub: Actions tab -> "Simulate matchups" -> "Run workflow".
+# The three jobs:
+#   1. build     - downloads and builds Forge (cached, so later runs are faster)
+#                  and converts our decklists into Forge's format
+#   2. simulate  - one job per opponent, all running at the same time
+#   3. summary   - combines the results into a table and saves it to the
+#                  PRIVATE repo: decks/<deck family>/results/
+#
+# PRIVACY: this repo is public, so anyone can see its step names and artifact
+# names, and any GitHub user can read its run logs. So:
+#   - our decks, plans, card fixes and AI profiles are read from the private
+#     repo (MTG-Private-List: decks/ and engine/)
+#   - anything we pass between jobs is encrypted first (openssl AES-256)
+#   - our deck name and AI profile name are masked (shown as ***) in every job's log,
+#     and are never used in step names or artifact names
+#   - results, card names and sideboard swaps are never printed in the logs
+#     or on the run page
+# COST: public repo + standard ubuntu-latest runners = free GitHub Actions minutes.
+#   Never add workflows to the private repo (those would use plan minutes).
+# Needs the secret PRIVATE_REPO_TOKEN: a fine-grained GitHub token with
+# Contents read+write on MTG-Private-List ONLY. ARTIFACT_KEY (optional) is a
+# separate encryption password; without it the token is used as the password.
+
+name: Simulate matchups
+
+on:
+  workflow_dispatch:
+    inputs:
+      games:
+        description: "Games per matchup (more = more accurate but slower)"
+        default: "20"
+        required: true
+      ours:
+        description: "Our deck name (a folder in the private repo's decks/, or an experiment/version file name there)"
+        default: ""
+        required: true
+      sideboard:
+        description: "Play post-sideboard games (uses the deck's plans.json in the private repo)"
+        type: boolean
+        default: false
+      opponent:
+        description: "Opponent(s) to play: a file name in decks/, several separated by commas, or all"
+        default: "all"
+        required: true
+      analytics:
+        description: "Keep full game logs and report card performance and game length"
+        type: boolean
+        default: false
+      ai:
+        description: "Forge AI level (Hard/Hardest think ahead: stronger but slower)"
+        type: choice
+        options: [Default, Hard, Hardest]
+        default: Default
+      priorities:
+        description: "Make the AI target the cards in plans/ai_priorities.json first, and use the private card fixes"
+        type: boolean
+        default: false
+      our_profile:
+        description: "AI profile for OUR deck only (a file in the private repo's engine/ai_profiles/, without .ai), or blank for the same as the opponent"
+        default: ""
+        required: false
+      shards:
+        description: "Split each matchup into this many jobs that run at the same time (faster; max 20 jobs run at once)"
+        default: "1"
+        required: true
+
+permissions:
+  contents: read    # this repo is only read; results go to the private repo
+
+# Encryption password for everything passed between jobs (never printed: GitHub hides secrets in logs)
+env:
+  ARTIFACT_KEY: ${{ secrets.ARTIFACT_KEY || secrets.PRIVATE_REPO_TOKEN }}
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. Build Forge and convert the decks
+  # -------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      cache-key: ${{ steps.forge.outputs.cache-key }}
+      opponents: ${{ steps.opponents.outputs.list }}
+      shards: ${{ steps.opponents.outputs.shards }}
+      tag: ${{ steps.private.outputs.tag }}        # a hash, safe to show (no deck name)
+    steps:
+      - name: Hide our deck name in this job's log
+        run: |
+          # Read the names straight from the run's event file, so they are never printed,
+          # then tell GitHub to show *** wherever they appear later in this job's log
+          for key in ours our_profile; do
+            v=$(jq -r --arg k "$key" '.inputs[$k] // ""' "$GITHUB_EVENT_PATH")
+            if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+          done
+
+      - name: Get our scripts and the meta decklists
+        uses: actions/checkout@v4
+
+      - name: Check the private repo token is set up
+        env:
+          TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "Missing secret PRIVATE_REPO_TOKEN (see the top of this file)"; exit 1; }
+
+      - name: Get our private decks and sim helpers (MTG-Private-List)
+        uses: actions/checkout@v4
+        with:
+          repository: grixis-lang/MTG-Private-List
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false   # this job only reads it
+
+      - name: Find our deck in the private repo
+        id: private
+        env:
+          OURS: ${{ inputs.ours }}
+          RUN_SETTINGS: ${{ inputs.ours }}|${{ inputs.sideboard }}|${{ inputs.ai }}|${{ inputs.priorities }}|${{ inputs.our_profile }}|${{ inputs.opponent }}
+        run: |
+          python3 scripts/private_deck.py private "$OURS" candidates > found.txt
+          DECK=$(sed -n 's/^deck=//p' found.txt); PLANS=$(sed -n 's/^plans=//p' found.txt)
+          FAM=$(sed -n 's/^family=//p' found.txt)
+          if [ -n "$FAM" ]; then echo "::add-mask::$FAM"; fi   # hide the folder name too
+          [ -n "$DECK" ] || { echo "Our deck was not found in the private repo"; exit 1; }
+          # A short hash of the run settings: used to queue result saving, shows no names
+          echo "tag=$(printf '%s' "$RUN_SETTINGS" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          # Copy into this job's workspace only (it is never committed here)
+          mkdir -p candidates plans
+          [ "$DECK" = "candidates/$OURS.txt" ] || cp "$DECK" "candidates/$OURS.txt"
+          if [ -n "$PLANS" ]; then cp "$PLANS" "plans/$OURS.json"; fi
+          # Private sim helpers: card fixes and our AI profiles (packed into the encrypted artifact below)
+          mkdir -p engine/card_overrides engine/ai_profiles
+          cp private/engine/card_overrides/*.txt engine/card_overrides/ 2>/dev/null || true
+          cp private/engine/ai_profiles/*.ai engine/ai_profiles/ 2>/dev/null || true
+          echo "Private helpers: $(ls engine/card_overrides | wc -l) card fixes, $(ls engine/ai_profiles | wc -l) AI profiles"
+          rm -rf private found.txt
+
+      - name: Download Forge's latest source code
+        id: forge
+        run: |
+          git clone --depth 1 https://github.com/Card-Forge/forge forge
+          SHA=$(git -C forge rev-parse --short HEAD)
+          echo "Forge version: $SHA"
+          echo "cache-key=forge-build-$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Reuse an earlier Forge build if this version was built before
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: forge-build
+          key: ${{ steps.forge.outputs.cache-key }}
+
+      - name: Set up Java 17
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build Forge (only when not cached)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd forge
+          mvn -B -ntp -pl forge-gui-desktop -am package -DskipTests
+          cd ..
+          mkdir -p forge-build/forge-gui
+          cp forge/forge-gui-desktop/target/forge-gui-desktop-*-jar-with-dependencies.jar forge-build/forge.jar
+          cp -r forge/forge-gui/res forge-build/forge-gui/res
+          ls -lh forge-build
+
+      - name: Convert decklists to Forge format
+        env:
+          OURS: ${{ inputs.ours }}
+          SIDEBOARD: ${{ inputs.sideboard }}
+        run: |
+          # The meta decks are public, so their output can be shown
+          python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder decks forge_decks --standard
+          # Our decks: hide the output, because a problem message would name our cards
+          HIDDEN="Our deck has a problem (details hidden to keep our cards private). Run convert_decks.py locally on it to see why."
+          python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder candidates forge_decks --standard \
+            > /dev/null 2>&1 || { echo "$HIDDEN"; exit 1; }
+          if [ "$SIDEBOARD" = "true" ]; then
+            test -f "plans/$OURS.json" || { echo "Our deck has no plans.json in the private repo"; exit 1; }
+            # (this script prints our sideboard swaps, so its output is hidden)
+            python3 scripts/apply_sideboard.py "candidates/$OURS.txt" "plans/$OURS.json" sideboarded \
+              > /dev/null 2>&1 || { echo "Applying our sideboard plan failed (details hidden)"; exit 1; }
+            python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder sideboarded forge_decks --standard \
+              > /dev/null 2>&1 || { echo "$HIDDEN"; exit 1; }
+          fi
+
+      - name: List the opponents (every meta deck in decks/)
+        id: opponents
+        env:
+          OURS: ${{ inputs.ours }}
+          OPPONENT: ${{ inputs.opponent }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          test -f "candidates/$OURS.txt" || { echo "Our deck file is missing"; exit 1; }
+          # Shards: each matchup is split into this many jobs (1, 2, 3 ...)
+          python3 -c 'import json,sys; n=int(sys.argv[1]); assert 1<=n<=20, "shards must be 1-20"; print("shards="+json.dumps(list(range(1,n+1))))' "$SHARDS" >> "$GITHUB_OUTPUT"
+          if [ "$OPPONENT" != "all" ]; then
+            # one opponent, or several separated by commas
+            LIST=$(python3 -c 'import json,sys; print(json.dumps([o.strip() for o in sys.argv[1].split(",") if o.strip()]))' "$OPPONENT")
+            for o in $(echo "$LIST" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
+              test -f "decks/$o.txt" || { echo "No decks/$o.txt"; exit 1; }
+            done
+          else
+            LIST=$(ls decks/*.txt | xargs -n1 basename | sed 's/\.txt$//' \
+                   | python3 -c 'import sys,json; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          fi
+          echo "Opponents: $LIST"
+          echo "list=$LIST" >> "$GITHUB_OUTPUT"
+
+      - name: Encrypt the converted decks and our private sim helpers
+        run: tar -czf - forge_decks engine | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:ARTIFACT_KEY -out forge-decks.enc
+
+      - name: Share the encrypted decks with the simulate jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-decks
+          path: forge-decks.enc
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # 2. Play the games (one job per opponent and shard)
+  # -------------------------------------------------------------------------
+  simulate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false            # one broken matchup shouldn't stop the others
+      matrix:
+        opponent: ${{ fromJSON(needs.build.outputs.opponents) }}
+        shard: ${{ fromJSON(needs.build.outputs.shards) }}
+    steps:
+      - name: Hide our deck name in this job's log
+        run: |
+          for key in ours our_profile; do
+            v=$(jq -r --arg k "$key" '.inputs[$k] // ""' "$GITHUB_EVENT_PATH")
+            if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+          done
+
+      - name: Get our scripts
+        uses: actions/checkout@v4
+
+      - name: Get the Forge build
+        uses: actions/cache/restore@v4
+        with:
+          path: forge-build
+          key: ${{ needs.build.outputs.cache-key }}
+          fail-on-cache-miss: true
+
+      - name: Get the encrypted decks
+        uses: actions/download-artifact@v4
+        with:
+          name: forge-decks
+          path: .
+
+      - name: Decrypt the decks and our private sim helpers
+        run: openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:ARTIFACT_KEY -in forge-decks.enc | tar -xzf -
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install a virtual screen (Forge expects one, even in simulation mode)
+        run: command -v xvfb-run >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y xvfb; }
+
+      - name: AI helpers - priority targets and private card fixes (priorities runs only)
+        if: inputs.priorities
+        # --quiet: print only how many card fixes were used, never their names
+        run: python3 scripts/apply_ai_priorities.py forge-build/forge-gui/res/cardsfolder plans/ai_priorities.json engine/card_overrides --quiet
+
+      - name: Add our own AI profiles (from the private repo) to Forge
+        env:
+          PROFILE: ${{ inputs.our_profile }}
+        run: |
+          cp engine/ai_profiles/*.ai forge-build/forge-gui/res/ai/ 2>/dev/null || true
+          # Stop early if the chosen profile doesn't exist (otherwise Forge would quietly use another one)
+          if [ -n "$PROFILE" ] && [ ! -f "forge-build/forge-gui/res/ai/$PROFILE.ai" ]; then
+            echo "The AI profile you chose is not in the private repo's engine/ai_profiles/"; exit 1
+          fi
+
+      - name: Play our deck vs ${{ matrix.opponent }}
+        env:
+          OURS: ${{ inputs.ours }}
+          SIDEBOARD: ${{ inputs.sideboard }}
+          PROFILE: ${{ inputs.our_profile }}
+          AI: ${{ inputs.ai }}
+          ANALYTICS: ${{ inputs.analytics }}
+          OPP: ${{ matrix.opponent }}
+          S: ${{ inputs.shards }}
+          I: ${{ matrix.shard }}
+          G: ${{ inputs.games }}
+        run: |
+          # With sideboarding on, play the copy of our deck sideboarded for this opponent
+          DECK="$OURS"
+          SB="${OURS}__sb__${OPP}"
+          if [ "$SIDEBOARD" = "true" ] && [ -f "forge_decks/$SB.dck" ]; then DECK="$SB"; fi
+          # This job's share of the games (e.g. 50 games over 4 shards = 13+13+12+12)
+          MINE=$(( G / S + ( I <= G % S ? 1 : 0 ) ))
+          echo "Shard $I of $S plays $MINE games"
+          [ "$MINE" -gt 0 ] || exit 0
+          TAG="${OPP}__s$I"
+          # Optional arguments, only added when used
+          EXTRA=()
+          if [ -n "$PROFILE" ]; then EXTRA+=(--our-ai "$PROFILE"); fi
+          if [ "$ANALYTICS" = "true" ]; then EXTRA+=(--log-out "out/logs/$TAG.log"); fi
+          if [ "$AI" = "Default" ]; then TIMEOUT=180; else TIMEOUT=600; fi
+          xvfb-run -a python3 scripts/run_matchup.py \
+            --jar forge-build/forge.jar \
+            --forge-gui forge-build/forge-gui \
+            --decks forge_decks \
+            --ours "$DECK" \
+            --report-as "$OURS" \
+            --parallel 2 \
+            --private \
+            --ai "$AI" \
+            --game-timeout "$TIMEOUT" \
+            --opponent "$OPP" \
+            --games "$MINE" \
+            --out "out/results/$TAG.json" \
+            "${EXTRA[@]}"
+
+      - name: Encrypt this matchup's result (and game log on analytics runs)
+        if: always()
+        run: |
+          # out/ holds only this job's files (results/*.json and logs/*.log)
+          [ -d out ] || exit 0
+          tar -czf - -C out . | openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:ARTIFACT_KEY \
+            -out "data-${{ matrix.opponent }}-${{ matrix.shard }}.enc"
+
+      - name: Save the encrypted result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Artifacts belong to this run only, so the name needs no deck name
+          name: data-${{ matrix.opponent }}-${{ matrix.shard }}
+          path: data-*.enc
+          if-no-files-found: ignore
+          retention-days: 3
+
+  # -------------------------------------------------------------------------
+  # 3. Build the results table and save it to the private repo
+  # -------------------------------------------------------------------------
+  summary:
+    needs: [build, simulate]
+    if: always()                  # still summarize if some matchups failed
+    runs-on: ubuntu-latest
+    # Only one run with the same settings saves results at a time
+    # (the group is a hash of the settings, so it shows no deck name)
+    concurrency:
+      group: simulate-results-${{ needs.build.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - name: Hide our deck name in this job's log
+        run: |
+          for key in ours our_profile; do
+            v=$(jq -r --arg k "$key" '.inputs[$k] // ""' "$GITHUB_EVENT_PATH")
+            if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+          done
+
+      - name: Get our scripts
+        uses: actions/checkout@v4
+
+      - name: Get the private repo (results are saved there)
+        uses: actions/checkout@v4
+        with:
+          repository: grixis-lang/MTG-Private-List
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+
+      - name: Find our deck's folder in the private repo
+        env:
+          OURS: ${{ inputs.ours }}
+        run: |
+          FAM=$(python3 scripts/private_deck.py private "$OURS" candidates | sed -n 's/^family=//p')
+          [ -n "$FAM" ] || { echo "Could not find our deck's folder"; exit 1; }
+          echo "::add-mask::$FAM"
+          # Kept in a file (not a step output) so the masked name passes safely to later steps
+          echo "$FAM" > "$RUNNER_TEMP/family.txt"
+
+      - name: Start a clean results folder with this deck's earlier results
+        run: |
+          FAM=$(cat "$RUNNER_TEMP/family.txt")
+          # The public results/ folder is replaced in this job only (never committed here)
+          rm -rf results logs && mkdir -p results/raw logs
+          # Earlier results let the best-of-three report pair game 1 with games 2-3
+          cp private/decks/"$FAM"/results/*.md results/ 2>/dev/null || true
+
+      - name: Collect all encrypted matchup results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: data-*
+          path: encrypted
+          merge-multiple: true
+
+      - name: Decrypt them
+        run: |
+          mkdir -p unpacked
+          for f in encrypted/*.enc; do
+            [ -f "$f" ] || continue
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:ARTIFACT_KEY -in "$f" | tar -xzf - -C unpacked
+          done
+          cp unpacked/results/*.json results/raw/ 2>/dev/null || true
+          cp unpacked/logs/*.log logs/ 2>/dev/null || true
+          rm -rf encrypted unpacked
+
+      - name: Get Forge's card scripts (the log analysis uses them to count each board)
+        if: inputs.analytics
+        uses: actions/cache/restore@v4
+        with:
+          path: forge-build
+          key: ${{ needs.build.outputs.cache-key }}
+
+      - name: Analyze the game logs, one report per opponent (analytics runs only)
+        if: inputs.analytics
+        env:
+          OURS: ${{ inputs.ours }}
+        run: |
+          for opp in $(ls logs/*__s*.log 2>/dev/null | xargs -n1 basename | sed 's/__s[0-9]*\.log$//' | sort -u); do
+            cat logs/${opp}__s*.log > "logs/$opp.log"          # join the shards' games
+            python3 scripts/analyze_logs.py "logs/$opp.log" "$OURS" \
+              "results/raw/$opp.analytics.md" forge-build/forge-gui/res/cardsfolder > /dev/null
+          done
+
+      - name: Build the results table
+        env:
+          OURS: ${{ inputs.ours }}
+          SIDEBOARD: ${{ inputs.sideboard }}
+          AI: ${{ inputs.ai }}
+          PRIORITIES: ${{ inputs.priorities }}
+          PROFILE: ${{ inputs.our_profile }}
+          OPPONENT: ${{ inputs.opponent }}
+        run: |
+          NAME="$OURS"
+          if [ "$SIDEBOARD" = "true" ]; then NAME="${NAME}_sideboarded"; fi
+          if [ "$AI" != "Default" ]; then NAME="${NAME}_${AI}"; fi
+          # runs with AI target priorities get their own files so they never mix with normal runs
+          if [ "$PRIORITIES" = "true" ]; then NAME="${NAME}_prio"; fi
+          if [ -n "$PROFILE" ]; then NAME="${NAME}_${PROFILE}"; fi
+          # A single-opponent run gets its own file so it never replaces a full 8-deck table
+          OPPTAG=$(echo "$OPPONENT" | tr -d ' ' | tr ',' '+')
+          if [ "$OPPONENT" != "all" ]; then NAME="${NAME}_vs_${OPPTAG}"; fi
+          # (the table is NOT printed: this repo's logs are public)
+          python3 scripts/summarize.py results/raw "results/$NAME.md" > /dev/null
+          echo "Results table saved to the private repo." >> "$GITHUB_STEP_SUMMARY"
+          # Analytics reports, one per opponent
+          for f in results/raw/*.analytics.md; do
+            [ -f "$f" ] || continue
+            opp=$(basename "$f" .analytics.md)
+            mkdir -p results/analytics
+            # sideboarded runs get their own analytics file so they don't replace game-1 reports
+            SBTAG=""; if [ "$SIDEBOARD" = "true" ]; then SBTAG="_sideboarded"; fi
+            PRIO=""; if [ "$PRIORITIES" = "true" ]; then PRIO="_prio"; fi
+            if [ -n "$PROFILE" ]; then PRIO="${PRIO}_${PROFILE}"; fi
+            cp "$f" "results/analytics/${OURS}${SBTAG}_${AI}${PRIO}_vs_${opp}.md"
+          done
+          # With sideboarding on and game-1 results available, estimate best-of-three
+          # (best-of-three estimate pairs files with the same AI level)
+          SUFFIX=""; if [ "$AI" != "Default" ]; then SUFFIX="_${AI}"; fi
+          if [ "$PRIORITIES" = "true" ]; then SUFFIX="${SUFFIX}_prio"; fi
+          if [ -n "$PROFILE" ]; then SUFFIX="${SUFFIX}_${PROFILE}"; fi
+          # single-opponent runs pair with the matching single-opponent game-1 file
+          if [ "$OPPONENT" != "all" ]; then SUFFIX="${SUFFIX}_vs_${OPPTAG}"; fi
+          if [ "$SIDEBOARD" = "true" ] && [ -f "results/${OURS}${SUFFIX}.md" ]; then
+            python3 scripts/bo3_report.py "$OURS" "$SUFFIX" > /dev/null
+          fi
+
+      - name: Save the results to the private repo (decks/<family>/results/)
+        env:
+          OURS: ${{ inputs.ours }}
+          SIDEBOARD: ${{ inputs.sideboard }}
+          AI: ${{ inputs.ai }}
+          PRIORITIES: ${{ inputs.priorities }}
+          GAMES: ${{ inputs.games }}
+        run: |
+          rm -rf results/raw
+          FAM=$(cat "$RUNNER_TEMP/family.txt")
+          DEST="private/decks/$FAM/results"
+          mkdir -p "$DEST"
+          cp -r results/. "$DEST/"
+          cd private
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add decks/
+          git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, ai=$AI, priorities=$PRIORITIES, $GAMES games)" || echo "No changes"
+          # another run may have pushed first; rebase and retry
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
