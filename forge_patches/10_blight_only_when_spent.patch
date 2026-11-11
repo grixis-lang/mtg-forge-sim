@@ -1,0 +1,146 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiCostDecision.java b/forge-ai/src/main/java/forge/ai/AiCostDecision.java
+index 46ce244..b04cb67 100644
+--- a/forge-ai/src/main/java/forge/ai/AiCostDecision.java
++++ b/forge-ai/src/main/java/forge/ai/AiCostDecision.java
+@@ -918,6 +918,13 @@ public class AiCostDecision extends CostDecisionMakerBase {
+ 
+     @Override
+     public PaymentDecision visit(CostBlight cost) {
++        // BLIGHT_ONLY_WHEN_SPENT: put the -1/-1 counter on the creature that has already done its job
++        if (BlightChoice.isEnabled(player)) {
++            final Card spent = BlightChoice.spentCreature(player);
++            if (spent != null) {
++                return PaymentDecision.card(spent);
++            }
++        }
+         // This tells the AI: "Treat this like placing counters"
+         return this.visit((CostPutCounter) cost);
+     }
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index d3c526c..d1ef4a6 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -94,6 +94,9 @@ public enum AiProps {
+     HOLD_X_DAMAGE_SPELLS_THRESHOLD("5"),
+     PRIORITY_REDUCTION_FOR_STORM_SPELLS ("0"),
+     USE_BERSERK_AGGRESSIVELY ("false"),
++    // Optional blight costs (e.g. Requiting Hex): only pay when the creature getting the -1/-1 counter has
++    // already done its job (a blocker that dies anyway, no trample). See BlightChoice.
++    BLIGHT_ONLY_WHEN_SPENT ("false"),
+     MIN_COUNT_FOR_STORM_SPELLS ("0"),
+     STRIPMINE_MIN_LANDS_IN_HAND_TO_ACTIVATE ("1"),
+     STRIPMINE_MIN_LANDS_FOR_NO_TIMING_CHECK ("3"),
+diff --git a/forge-ai/src/main/java/forge/ai/BlightChoice.java b/forge-ai/src/main/java/forge/ai/BlightChoice.java
+new file mode 100644
+index 0000000..9436374
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/BlightChoice.java
+@@ -0,0 +1,84 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import forge.game.card.Card;
++import forge.game.combat.Combat;
++import forge.game.keyword.Keyword;
++import forge.game.player.Player;
++
++/**
++ * "Blight only when the creature has already done its job" (AI profile property
++ * BLIGHT_ONLY_WHEN_SPENT=true). Used for optional blight costs like Requiting Hex
++ * ("you may blight 1": put a -1/-1 counter on a creature you control to gain 2 life).
++ *
++ * The user's rule (rule 4 in notes/how_we_play_control.md): pay the blight when the
++ * creature that takes the -1/-1 counter has already done its job - e.g. our 1/1 has
++ * already blocked. Once a creature is declared as a blocker, the attacker stays
++ * "blocked" even if the blocker dies, so it deals no damage to us (unless it has
++ * trample - then the damage would go through to us, so that blocker is NOT spent).
++ * Otherwise don't pay the blight; just cast the spell without it.
++ *
++ * Off by default (Forge's default AI always pays an optional cost if it can).
++ */
++public final class BlightChoice {
++
++    private BlightChoice() {
++    }
++
++    // -----------------------------------------------------------------------
++    // 1. Is the rule switched on for this player's AI profile?
++    // -----------------------------------------------------------------------
++    public static boolean isEnabled(final Player ai) {
++        return ai.getController() instanceof PlayerControllerAi pc
++                && pc.getAi().getBoolProperty(AiProps.BLIGHT_ONLY_WHEN_SPENT);
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. A creature of ours that has already done its job, or null:
++    //    - it is blocking right now (blockers have been declared), and
++    //    - none of the attackers it blocks has trample (so killing our blocker
++    //      lets no damage through), and
++    //    - it would die in this combat anyway (the attackers' power is at least
++    //      its toughness), or it's a token (no card is lost).
++    //    Among several, the least valuable one (tokens first).
++    // -----------------------------------------------------------------------
++    public static Card spentCreature(final Player ai) {
++        final Combat combat = ai.getGame().getCombat();
++        if (combat == null) {
++            return null;
++        }
++        Card best = null;
++        for (final Card c : ai.getCreaturesInPlay()) {
++            if (!combat.isBlocking(c)) {
++                continue;
++            }
++            int incoming = 0;
++            boolean trample = false;
++            for (final Card attacker : combat.getAttackersBlockedBy(c)) {
++                incoming += Math.max(0, attacker.getNetCombatDamage());
++                trample |= attacker.hasKeyword(Keyword.TRAMPLE);
++            }
++            if (trample) {
++                continue;   // removing this blocker would let the damage trample over to us
++            }
++            final boolean diesAnyway = incoming >= c.getNetToughness();
++            if (!diesAnyway && !c.isToken()) {
++                continue;   // it survives this combat and still has a job to do
++            }
++            if (best == null || isLessValuable(c, best)) {
++                best = c;
++            }
++        }
++        return best;
++    }
++
++    // tokens before cards, then the weaker creature
++    private static boolean isLessValuable(final Card a, final Card b) {
++        if (a.isToken() != b.isToken()) {
++            return a.isToken();
++        }
++        return ComputerUtilCard.evaluateCreature(a) < ComputerUtilCard.evaluateCreature(b);
++    }
++}
+diff --git a/forge-ai/src/main/java/forge/ai/SpellAbilityAi.java b/forge-ai/src/main/java/forge/ai/SpellAbilityAi.java
+index 742419f..ff5c282 100644
+--- a/forge-ai/src/main/java/forge/ai/SpellAbilityAi.java
++++ b/forge-ai/src/main/java/forge/ai/SpellAbilityAi.java
+@@ -18,6 +18,7 @@ import forge.game.card.CardCopyService;
+ import forge.game.card.CardState;
+ import forge.game.card.CounterType;
+ import forge.game.cost.Cost;
++import forge.game.cost.CostBlight;
+ import forge.game.mana.ManaCostBeingPaid;
+ import forge.game.phase.PhaseHandler;
+ import forge.game.phase.PhaseType;
+@@ -433,6 +434,11 @@ public abstract class SpellAbilityAi extends SpellAbilityEffect {
+         Cost costSoFar = chosen.getPayCosts().copy();
+ 
+         for (OptionalCostValue opt : optionalCostValues) {
++            // BLIGHT_ONLY_WHEN_SPENT: skip an optional blight unless a creature of ours has already done its job
++            if (BlightChoice.isEnabled(payer) && opt.getCost().hasSpecificCostType(CostBlight.class)
++                    && BlightChoice.spentCreature(payer) == null) {
++                continue;
++            }
+             // Choose the optional cost if it can be paid (to be improved later, check for playability and other conditions perhaps)
+             Cost fullCost = opt.getCost().copy().add(costSoFar);
+             SpellAbility fullCostSa = chosen.copyWithDefinedCost(fullCost);
