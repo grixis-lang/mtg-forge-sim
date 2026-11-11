@@ -4,7 +4,8 @@
 #
 # Game-1 tests of one or more of our decks against ONE opponent, one test after
 # another (each waits for the previous one to finish).
-# User rules (2026-11-11): one opponent per test while tuning; one job at a time.
+# User rules (2026-11-11): one opponent per test while tuning; one test at a time,
+# its games split over 4 machines that play at the same time.
 #   <opponent> = a file name in decks/ without .txt, e.g. boros_dwarves
 #   <profile>  = our AI profile name, or "" for none
 # ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ for D in "$@"; do
   before=$(gh api "repos/$REPO/actions/runs?per_page=1" --jq '.workflow_runs[0].id')
   gh api -X POST repos/$REPO/actions/workflows/simulate.yml/dispatches -f ref=main -f "inputs[games]=$G" -f "inputs[ours]=$D" \
     -F "inputs[sideboard]=false" -f "inputs[opponent]=$OPP" -F "inputs[analytics]=true" -f "inputs[ai]=Hardest" \
-    -F "inputs[priorities]=true" -f "inputs[shards]=1" -f "inputs[our_profile]=$P"
+    -F "inputs[priorities]=true" -f "inputs[shards]=4" -f "inputs[our_profile]=$P"
   sleep 15
   R=$(gh api "repos/$REPO/actions/runs?per_page=3" --jq ".workflow_runs[] | select(.id > $before) | .id" | tail -1)
   echo "[$(date +%H:%M)] $D vs $OPP: run $R"
