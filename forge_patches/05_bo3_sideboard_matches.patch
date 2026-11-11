@@ -1,0 +1,124 @@
+diff --git a/forge-gui-desktop/src/main/java/forge/view/SimulateMatch.java b/forge-gui-desktop/src/main/java/forge/view/SimulateMatch.java
+index 66fde34d..044cdcf0 100644
+--- a/forge-gui-desktop/src/main/java/forge/view/SimulateMatch.java
++++ b/forge-gui-desktop/src/main/java/forge/view/SimulateMatch.java
+@@ -10,13 +10,16 @@ import org.apache.commons.lang3.time.StopWatch;
+ import forge.LobbyPlayer;
+ import forge.ai.AiProfileUtil;
+ import forge.ai.simulation.FlatMonteCarloStats;
++import forge.deck.CardPool;
+ import forge.deck.Deck;
++import forge.deck.DeckSection;
+ import forge.deck.DeckGroup;
+ import forge.deck.io.DeckSerializer;
+ import forge.game.Game;
+ import forge.game.GameEndReason;
+ import forge.game.GameLogEntry;
+ import forge.game.GameLogEntryType;
++import forge.game.GameOutcome;
+ import forge.game.GameRules;
+ import forge.game.GameType;
+ import forge.game.Match;
+@@ -187,6 +190,25 @@ public class SimulateMatch {
+             }
+         }
+ 
++        // Best-of-3 with sideboarding: decks each player switches to after game 1 of every
++        // match, in the same order as -d. (Forge's own AI sideboarding is off in simulations.)
++        List<Deck> sideboardedDecks = null;
++        if (params.containsKey("sb")) {
++            sideboardedDecks = new ArrayList<>();
++            for (String deck : params.get("sb")) {
++                Deck d = deckFromCommandLineParameter(deck, type, deckDir);
++                if (d == null) {
++                    System.out.println(TextUtil.concatNoSpace("Could not load sideboarded deck - ", deck, ", match cannot start"));
++                    return;
++                }
++                sideboardedDecks.add(d);
++            }
++            if (sideboardedDecks.size() != pp.size()) {
++                System.out.println("-sb needs one deck per player, in the same order as -d");
++                return;
++            }
++        }
++
+         if (params.containsKey("c")) {
+             rules.setSimTimeout(Integer.parseInt(params.get("c").get(0)));
+         }
+@@ -201,11 +223,27 @@ public class SimulateMatch {
+         Match mc = new Match(rules, pp, "Test");
+ 
+         if (matchSize != 0) {
+-            int iGame = 0;
+-            while (!mc.isMatchOver()) {
+-                // play games until the match ends
+-                simulateSingleMatch(mc, iGame, outputGamelog);
+-                iGame++;
++            // With -m, -n is the number of matches to play (default 1)
++            final int nMatches = params.containsKey("n") ? nGames : 1;
++            for (int iMatch = 0; iMatch < nMatches; iMatch++) {
++                // every match starts again from the game-1 decks
++                for (RegisteredPlayer rp : pp) {
++                    rp.restoreDeck();
++                }
++                final Match match = iMatch == 0 ? mc : new Match(rules, pp, "Test");
++                int iGame = 0;
++                // play games until someone wins the match; like a real best-of-3, stop after
++                // matchSize games even if draws meant nobody reached the needed wins
++                while (!match.isMatchOver() && iGame < matchSize) {
++                    if (iGame == 1 && sideboardedDecks != null) {
++                        for (int p = 0; p < pp.size(); p++) {
++                            switchDeck(pp.get(p).getDeck(), sideboardedDecks.get(p));
++                        }
++                    }
++                    simulateSingleMatch(match, iGame, outputGamelog);
++                    iGame++;
++                }
++                printMatchResult(match, iMatch, pp);
+             }
+         } else {
+             for (int iGame = 0; iGame < nGames; iGame++) {
+@@ -219,6 +257,33 @@ public class SimulateMatch {
+         System.out.flush();
+     }
+ 
++    /** Replace a player's deck for the next game with its sideboarded version (main deck and sideboard). */
++    private static void switchDeck(final Deck current, final Deck sideboarded) {
++        current.getMain().clear();
++        current.getMain().addAll(sideboarded.getMain());
++        final CardPool side = current.getOrCreate(DeckSection.Sideboard);
++        side.clear();
++        if (sideboarded.has(DeckSection.Sideboard)) {
++            side.addAll(sideboarded.get(DeckSection.Sideboard));
++        }
++    }
++
++    /** One line per match, e.g. "Match Result: Match 3 | Ai(1)-x 2 | Ai(2)-y 1 | draws 0". */
++    private static void printMatchResult(final Match match, final int iMatch, final List<RegisteredPlayer> pp) {
++        final StringBuilder sb = new StringBuilder("Match Result: Match ").append(iMatch + 1);
++        for (RegisteredPlayer rp : pp) {
++            sb.append(" | ").append(rp.getPlayer().getName()).append(' ').append(match.getGamesWonBy(rp.getPlayer()));
++        }
++        int draws = 0;
++        for (GameOutcome go : match.getOutcomes()) {
++            if (go.isDraw()) {
++                draws++;
++            }
++        }
++        sb.append(" | draws ").append(draws);
++        System.out.println(sb);
++    }
++
+     private static void argumentHelp() {
+         System.out.println("Syntax: forge.exe sim -d <deck1[.dck]> ... <deckX[.dck]> -D [D] -n [N] -m [M] -t [T] -p [P] -f [F] -s [S] -a [A] -mc [on|off] -q");
+         System.out.println("\tsim - stands for simulation mode");
+@@ -226,7 +291,8 @@ public class SimulateMatch {
+         System.out.println("\tdeck is treated as file if it ends with a dot followed by three numbers or letters");
+         System.out.println("\tD - absolute directory to load decks from");
+         System.out.println("\tN - number of games, defaults to 1 (Ignores match setting)");
+-        System.out.println("\tM - Play full match of X games, typically 1,3,5 games. (Optional, overrides N)");
++        System.out.println("\tM - Play full match of X games, typically 1,3,5 games. With M, N is the number of matches");
++        System.out.println("\tSB - sideboarded decks (one per player, same order as -d) used from game 2 of each match");
+         System.out.println("\tT - Type of tournament to run with all provided decks (Bracket, RoundRobin, Swiss)");
+         System.out.println("\tP - Amount of players per match (used only with Tournaments, defaults to 2)");
+         System.out.println("\tF - format of games, defaults to constructed");

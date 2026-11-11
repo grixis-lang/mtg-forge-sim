@@ -23,7 +23,28 @@ WARN_BELOW = 45.0   # flag matchups where our win rate is under this percent
 
 
 # ---------------------------------------------------------------------------
-# 2. Build the Markdown table
+# 2. Helpers for best-of-3 parts ({"wins", "losses", "draws"} dictionaries)
+# ---------------------------------------------------------------------------
+def add_parts(parts) -> dict:
+    total = {"wins": 0, "losses": 0, "draws": 0}
+    for part in parts:
+        for k in total:
+            total[k] += (part or {}).get(k, 0)
+    return total
+
+
+def part_pct(part: dict | None) -> str:
+    """Win % of one part (draws count half), with the number of games."""
+    if not part:
+        return "-"
+    games = part["wins"] + part["losses"] + part["draws"]
+    if not games:
+        return "-"
+    return f"{100 * (part['wins'] + 0.5 * part['draws']) / games:.0f}% ({games})"
+
+
+# ---------------------------------------------------------------------------
+# 2b. Build the Markdown table
 # ---------------------------------------------------------------------------
 def build_table(results: list[dict]) -> str:
     ours = results[0]["ours"] if results else "?"
@@ -37,9 +58,16 @@ def build_table(results: list[dict]) -> str:
         "not exact win rates. Note \"they sideboarded\" = the opponent played its "
         "sideboard plan against us too.",
         "",
-        "| Opponent | W | L | D | Games | Win % | Note |",
-        "|---|---:|---:|---:|---:|---:|---|",
     ]
+    bo3 = any(r.get("bo3") for r in results)
+    if bo3:
+        lines[-1] += (" **Best-of-3 run:** W/L/D are MATCHES. Game 1 = both main decks; "
+                      "games 2-3 = both sideboarded (ours from plans.json, theirs from plans/opponents/).")
+        lines += ["", "| Opponent | Match W | L | D | Matches | Match win % | Game 1 win % | Games 2-3 win % | Note |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    else:
+        lines += ["| Opponent | W | L | D | Games | Win % | Note |",
+                  "|---|---:|---:|---:|---:|---:|---|"]
 
     total_w = total_l = total_d = 0
     # Sort from worst matchup to best so problems are at the top
@@ -57,17 +85,29 @@ def build_table(results: list[dict]) -> str:
             note = "weak matchup"
         if r.get("opponent_sideboarded"):
             note = f"{note}, they sideboarded" if note else "they sideboarded"
-        lines.append(f"| {r['opponent']} | {r['wins']} | {r['losses']} | {r['draws']} "
-                     f"| {games} | {pct:.0f}% | {note} |")
+        if bo3:
+            lines.append(f"| {r['opponent']} | {r['wins']} | {r['losses']} | {r['draws']} "
+                         f"| {games} | {pct:.0f}% | {part_pct(r.get('game1'))} "
+                         f"| {part_pct(r.get('games_2_3'))} | {note} |")
+        else:
+            lines.append(f"| {r['opponent']} | {r['wins']} | {r['losses']} | {r['draws']} "
+                         f"| {games} | {pct:.0f}% | {note} |")
         total_w, total_l, total_d = total_w + r["wins"], total_l + r["losses"], total_d + r["draws"]
 
     total = total_w + total_l + total_d
     overall = 100 * (total_w + 0.5 * total_d) / total if total else 0.0
-    lines.append(f"| **Overall** | **{total_w}** | **{total_l}** | **{total_d}** "
-                 f"| **{total}** | **{overall:.0f}%** | |")
+    if bo3:
+        g1 = add_parts(r.get("game1") for r in results)
+        g23 = add_parts(r.get("games_2_3") for r in results)
+        lines.append(f"| **Overall** | **{total_w}** | **{total_l}** | **{total_d}** "
+                     f"| **{total}** | **{overall:.0f}%** | **{part_pct(g1)}** | **{part_pct(g23)}** | |")
+    else:
+        lines.append(f"| **Overall** | **{total_w}** | **{total_l}** | **{total_d}** "
+                     f"| **{total}** | **{overall:.0f}%** | |")
     per = max(r.get("games_requested", 0) for r in results)
     margin = round(100 / (per ** 0.5)) if per else 0   # rough 95% margin for a 50/50 matchup
-    lines += ["", f"With {per} games per matchup, a result can be off by roughly "
+    unit = "matches" if bo3 else "games"
+    lines += ["", f"With {per} {unit} per matchup, a result can be off by roughly "
               f"±{margin} percentage points by luck alone. More games narrow that."]
     # Any Forge crashes: how many games were played again, and the error seen
     notes = [(r["opponent"], r.get("replayed_games", 0), r.get("problems", [])) for r in results]
@@ -104,6 +144,13 @@ def main() -> None:
             m[k] += r.get(k, 0)
         m["replayed_games"] += r.get("replayed_games", 0)
         m["problems"] += r.get("problems", [])
+        # best-of-3 runs: add up game 1 and games 2-3 across shards too
+        for part in ("game1", "games_2_3"):
+            if part in r:
+                m.setdefault("parts_added", {})[part] = add_parts(
+                    [m.get("parts_added", {}).get(part), r[part]])
+    for m in merged.values():
+        m.update(m.pop("parts_added", {}))   # replace the first shard's numbers with the totals
     results = list(merged.values())
 
     table = build_table(results)

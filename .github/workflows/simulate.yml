@@ -40,6 +40,10 @@ on:
         description: "Play post-sideboard games (uses the deck's plans.json in the private repo)"
         type: boolean
         default: false
+      bo3:
+        description: "Play real best-of-3 MATCHES (games = number of matches). Both decks sideboard after game 1"
+        type: boolean
+        default: false
       opponent:
         description: "ONE opponent to play: a file name in decks/ (user rule: one opponent per test while tuning)"
         default: ""
@@ -116,7 +120,7 @@ jobs:
         id: private
         env:
           OURS: ${{ inputs.ours }}
-          RUN_SETTINGS: ${{ inputs.ours }}|${{ inputs.sideboard }}|${{ inputs.ai }}|${{ inputs.priorities }}|${{ inputs.our_profile }}|${{ inputs.opponent }}
+          RUN_SETTINGS: ${{ inputs.ours }}|${{ inputs.sideboard }}|${{ inputs.bo3 }}|${{ inputs.ai }}|${{ inputs.priorities }}|${{ inputs.our_profile }}|${{ inputs.opponent }}
         run: |
           python3 scripts/private_deck.py private "$OURS" candidates > found.txt
           DECK=$(sed -n 's/^deck=//p' found.txt); PLANS=$(sed -n 's/^plans=//p' found.txt)
@@ -198,6 +202,7 @@ jobs:
         env:
           OURS: ${{ inputs.ours }}
           SIDEBOARD: ${{ inputs.sideboard }}
+          BO3: ${{ inputs.bo3 }}
         run: |
           # The meta decks are public, so their output can be shown
           python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder decks forge_decks --standard
@@ -205,7 +210,8 @@ jobs:
           HIDDEN="Our deck has a problem (details hidden to keep our cards private). Run convert_decks.py locally on it to see why."
           python3 scripts/convert_decks.py forge/forge-gui/res/cardsfolder candidates forge_decks --standard \
             > /dev/null 2>&1 || { echo "$HIDDEN"; exit 1; }
-          if [ "$SIDEBOARD" = "true" ]; then
+          # Sideboarded decks are needed for sideboard runs and for best-of-3 matches
+          if [ "$SIDEBOARD" = "true" ] || [ "$BO3" = "true" ]; then
             test -f "plans/$OURS.json" || { echo "Our deck has no plans.json in the private repo"; exit 1; }
             # (this script prints our sideboard swaps, so its output is hidden)
             python3 scripts/apply_sideboard.py "candidates/$OURS.txt" "plans/$OURS.json" sideboarded \
@@ -352,6 +358,7 @@ jobs:
         env:
           OURS: ${{ inputs.ours }}
           SIDEBOARD: ${{ inputs.sideboard }}
+          BO3: ${{ inputs.bo3 }}
           PROFILE: ${{ inputs.our_profile }}
           AI: ${{ inputs.ai }}
           ANALYTICS: ${{ inputs.analytics }}
@@ -366,7 +373,7 @@ jobs:
           if [ "$SIDEBOARD" = "true" ] && [ -f "forge_decks/$SB.dck" ]; then DECK="$SB"; fi
           # The opponent plays its copy sideboarded against our deck's style, if it has one
           OPPDECK="$OPP"
-          if [ "$SIDEBOARD" = "true" ] && [ -f forge_decks/_our_style.txt ]; then
+          if { [ "$SIDEBOARD" = "true" ] || [ "$BO3" = "true" ]; } && [ -f forge_decks/_our_style.txt ]; then
             STYLE=$(cat forge_decks/_our_style.txt)
             if [ -f "forge_decks/${OPP}__sb__${STYLE}.dck" ]; then OPPDECK="${OPP}__sb__${STYLE}"; fi
           fi
@@ -379,6 +386,13 @@ jobs:
           EXTRA=()
           if [ -n "$PROFILE" ]; then EXTRA+=(--our-ai "$PROFILE"); fi
           if [ "$ANALYTICS" = "true" ]; then EXTRA+=(--log-out "out/logs/$TAG.log"); fi
+          if [ "$BO3" = "true" ]; then
+            # Real matches: game 1 with both main decks, games 2-3 with both sideboarded decks.
+            # Our sideboarded copy exists only if our plans.json has a plan for this opponent.
+            OURS_SB="$OURS"; if [ -f "forge_decks/$SB.dck" ]; then OURS_SB="$SB"; fi
+            EXTRA+=(--bo3 --ours-sb "$OURS_SB" --opponent-sb "$OPPDECK")
+            DECK="$OURS"; OPPDECK="$OPP"            # game 1 uses the main decks
+          fi
           if [ "$AI" = "Default" ]; then TIMEOUT=180; else TIMEOUT=600; fi
           xvfb-run -a python3 scripts/run_matchup.py \
             --jar forge-build/forge.jar \
@@ -502,13 +516,15 @@ jobs:
         env:
           OURS: ${{ inputs.ours }}
           SIDEBOARD: ${{ inputs.sideboard }}
+          BO3: ${{ inputs.bo3 }}
           AI: ${{ inputs.ai }}
           PRIORITIES: ${{ inputs.priorities }}
           PROFILE: ${{ inputs.our_profile }}
           OPPONENT: ${{ inputs.opponent }}
         run: |
           NAME="$OURS"
-          if [ "$SIDEBOARD" = "true" ]; then NAME="${NAME}_sideboarded"; fi
+          if [ "$BO3" = "true" ]; then NAME="${NAME}_bo3"
+          elif [ "$SIDEBOARD" = "true" ]; then NAME="${NAME}_sideboarded"; fi
           if [ "$AI" != "Default" ]; then NAME="${NAME}_${AI}"; fi
           # runs with AI target priorities get their own files so they never mix with normal runs
           if [ "$PRIORITIES" = "true" ]; then NAME="${NAME}_prio"; fi
@@ -525,7 +541,7 @@ jobs:
             opp=$(basename "$f" .analytics.md)
             mkdir -p results/analytics
             # sideboarded runs get their own analytics file so they don't replace game-1 reports
-            SBTAG=""; if [ "$SIDEBOARD" = "true" ]; then SBTAG="_sideboarded"; fi
+            SBTAG=""; if [ "$BO3" = "true" ]; then SBTAG="_bo3"; elif [ "$SIDEBOARD" = "true" ]; then SBTAG="_sideboarded"; fi
             PRIO=""; if [ "$PRIORITIES" = "true" ]; then PRIO="_prio"; fi
             if [ -n "$PROFILE" ]; then PRIO="${PRIO}_${PROFILE}"; fi
             cp "$f" "results/analytics/${OURS}${SBTAG}_${AI}${PRIO}_vs_${opp}.md"
@@ -537,7 +553,8 @@ jobs:
           if [ -n "$PROFILE" ]; then SUFFIX="${SUFFIX}_${PROFILE}"; fi
           # single-opponent runs pair with the matching single-opponent game-1 file
           if [ "$OPPONENT" != "all" ]; then SUFFIX="${SUFFIX}_vs_${OPPTAG}"; fi
-          if [ "$SIDEBOARD" = "true" ] && [ -f "results/${OURS}${SUFFIX}.md" ]; then
+          # (not for best-of-3 runs: those are real matches, no estimate needed)
+          if [ "$BO3" != "true" ] && [ "$SIDEBOARD" = "true" ] && [ -f "results/${OURS}${SUFFIX}.md" ]; then
             python3 scripts/bo3_report.py "$OURS" "$SUFFIX" > /dev/null
           fi
 
@@ -545,6 +562,7 @@ jobs:
         env:
           OURS: ${{ inputs.ours }}
           SIDEBOARD: ${{ inputs.sideboard }}
+          BO3: ${{ inputs.bo3 }}
           AI: ${{ inputs.ai }}
           PRIORITIES: ${{ inputs.priorities }}
           GAMES: ${{ inputs.games }}
@@ -558,6 +576,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add decks/
-          git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, ai=$AI, priorities=$PRIORITIES, $GAMES games)" || echo "No changes"
+          git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, bo3=$BO3, ai=$AI, priorities=$PRIORITIES, $GAMES games)" || echo "No changes"
           # another run may have pushed first; rebase and retry
           for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done

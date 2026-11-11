@@ -14,6 +14,12 @@ Forge prints one line per game, for example:
     Game Result: Game 4 ended in a Draw! Took 120000 ms.
 This script counts those lines.
 
+--bo3 plays real best-of-3 MATCHES instead (needs our Forge patch 03):
+--games is then the number of matches. Game 1 uses both main decks; from game 2
+each side switches to its sideboarded deck (--ours-sb / --opponent-sb), and the
+loser of the previous game goes first. Forge prints one line per match:
+    Match Result: Match 3 | Ai(1)-grixis_walkers 2 | Ai(2)-boros_dragons 1 | draws 0
+
 --parallel N splits the games into N batches and runs N copies of Forge at
 the same time (each uses one CPU core). Keep N at 2 on GitHub's 4-core
 machines: the Hardest AI thinks on a time budget, so crowding the CPU would make
@@ -35,6 +41,8 @@ from pathlib import Path
 # Matches: "Game Result: Game 3 ended in 41234 ms. Ai(1)-grixis_walkers has won!"
 WIN_LINE = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. Ai\((\d)\)-(.+?) has won!")
 DRAW_LINE = re.compile(r"Game Result: Game (\d+) ended in a Draw!")
+# Matches: "Match Result: Match 3 | Ai(1)-ours 2 | Ai(2)-them 1 | draws 0" (best-of-3 runs)
+MATCH_LINE = re.compile(r"Match Result: Match (\d+) \| Ai\(1\)-(.+?) (\d+) \| Ai\(2\)-(.+?) (\d+) \| draws (\d+)")
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +80,13 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--opponent-deck", default=None,
                    help="the opponent's .dck to actually load (e.g. its sideboarded copy "
                         "'<opponent>__sb__<style>'); results still use --opponent as the name")
+    p.add_argument("--bo3", action="store_true",
+                   help="play best-of-3 matches: --games is the number of MATCHES, "
+                        "and both sides switch to their sideboarded decks after game 1")
+    p.add_argument("--ours-sb", default=None,
+                   help="best-of-3: our sideboarded .dck for games 2-3 (default: our main deck)")
+    p.add_argument("--opponent-sb", default=None,
+                   help="best-of-3: the opponent's sideboarded .dck for games 2-3 (default: its main deck)")
     return p.parse_args()
 
 
@@ -87,9 +102,14 @@ def forge_command(args: argparse.Namespace, games: int, memory: str) -> list[str
         # the opponent's sideboarded copy is loaded when given, else its main deck
         "-d", f"{args.ours}.dck", f"{args.opponent_deck or args.opponent}.dck",
         "-D", decks_dir,                         # folder the .dck files are in
-        "-n", str(games),                        # number of games
+        "-n", str(games),                        # number of games (matches with --bo3)
         "-c", str(args.game_timeout),            # per-game time limit
     ]
+    if args.bo3:
+        # best of 3; from game 2 each side plays its sideboarded deck (Forge patch 03)
+        command += ["-m", "3",
+                    "-sb", f"{args.ours_sb or args.ours}.dck",
+                    f"{args.opponent_sb or args.opponent_deck or args.opponent}.dck"]
     if not args.log_out:
         command.append("-q")                     # quiet: results only, no full logs
     if args.our_ai:
@@ -111,7 +131,8 @@ def run_batches(args: argparse.Namespace, batches: list[int]) -> list[tuple[int,
     """Start one copy of Forge per batch at the same time.
     Returns (games asked for, everything it printed, exit code) for each batch."""
     memory = "4g" if len(batches) == 1 else "3g"     # keep total memory within the machine's limit
-    overall_limit = max(batches) * args.game_timeout + 600   # so a stuck run can't run forever
+    per_unit = 3 if args.bo3 else 1                  # a match is up to 3 games
+    overall_limit = max(batches) * per_unit * args.game_timeout + 600   # so a stuck run can't run forever
     # Each copy of Forge creates its settings and cache folders on start-up (in a
     # fixed order, ending with ~/.cache/forge/pics/planechase). Two copies doing
     # that at the same moment can make one of them quit ("cannot create profile
@@ -127,7 +148,12 @@ def run_batches(args: argparse.Namespace, batches: list[int]) -> list[tuple[int,
                 time.sleep(0.5)
             time.sleep(1)
         command = forge_command(args, games, memory)
-        print(f"Running batch {i + 1}/{len(batches)} ({games} games):", " ".join(command), flush=True)
+        unit = "matches" if args.bo3 else "games"
+        if args.private:
+            # public log: don't show the command, its deck names would describe our deck
+            print(f"Running batch {i + 1}/{len(batches)} ({games} {unit})", flush=True)
+        else:
+            print(f"Running batch {i + 1}/{len(batches)} ({games} {unit}):", " ".join(command), flush=True)
         running.append((games, subprocess.Popen(command, cwd=args.forge_gui,   # Forge looks for res/ here
                                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)))
     finished = []
@@ -142,17 +168,24 @@ def run_batches(args: argparse.Namespace, batches: list[int]) -> list[tuple[int,
     return finished
 
 
-def games_in(output: str) -> int:
-    """How many finished games a batch's output contains."""
-    return sum(1 for line in output.splitlines() if WIN_LINE.search(line) or DRAW_LINE.search(line))
+def is_end_line(line: str, bo3: bool) -> bool:
+    """True for the line that closes one unit: a game, or a whole match with --bo3."""
+    if bo3:
+        return bool(MATCH_LINE.search(line))
+    return bool(WIN_LINE.search(line) or DRAW_LINE.search(line))
 
 
-def finished_part(output: str) -> str:
-    """The output up to the end of the last finished game. A crashed copy can stop
-    in the middle of a game; that half game is dropped so it can't get mixed into
-    the next game when the logs are joined."""
+def games_in(output: str, bo3: bool = False) -> int:
+    """How many finished games (or matches with --bo3) a batch's output contains."""
+    return sum(1 for line in output.splitlines() if is_end_line(line, bo3))
+
+
+def finished_part(output: str, bo3: bool = False) -> str:
+    """The output up to the end of the last finished game (or match with --bo3).
+    A crashed copy can stop in the middle; that half is dropped so it can't get
+    mixed into the next one when the logs are joined."""
     lines = output.splitlines()
-    last = max((i for i, ln in enumerate(lines) if WIN_LINE.search(ln) or DRAW_LINE.search(ln)), default=-1)
+    last = max((i for i, ln in enumerate(lines) if is_end_line(ln, bo3)), default=-1)
     return "\n".join(lines[:last + 1])
 
 
@@ -175,8 +208,8 @@ def run_forge(args: argparse.Namespace) -> tuple[str, list[str], int]:
     for attempt in range(3):
         missing = 0
         for asked, output, code in run_batches(args, batches):
-            got = games_in(output)
-            outputs.append(finished_part(output))
+            got = games_in(output, args.bo3)
+            outputs.append(finished_part(output, args.bo3))
             if got < asked:
                 missing += asked - got
                 problems.append(f"attempt {attempt + 1}: " + problem_text(output, code, asked, got))
@@ -208,6 +241,31 @@ def count_results(output: str, ours: str) -> dict:
     return {"wins": wins, "losses": losses, "draws": draws}
 
 
+def count_bo3(output: str, ours: str) -> dict:
+    """Best-of-3: wins/losses/draws are MATCHES. Also counts game 1 (main decks)
+    and games 2-3 (both sideboarded) separately, from our side."""
+    match = {"wins": 0, "losses": 0, "draws": 0}
+    game1 = {"wins": 0, "losses": 0, "draws": 0}
+    later = {"wins": 0, "losses": 0, "draws": 0}
+    for line in output.splitlines():
+        win, draw, m = WIN_LINE.search(line), DRAW_LINE.search(line), MATCH_LINE.search(line)
+        if win or draw:
+            number = int((win or draw).group(1))          # game number inside its match
+            bucket = game1 if number == 1 else later
+            if draw:
+                bucket["draws"] += 1
+            elif win.group(3).strip() == ours:
+                bucket["wins"] += 1
+            else:
+                bucket["losses"] += 1
+        elif m:
+            # player 1 is always our deck (-d ours opponent)
+            mine, theirs = int(m.group(3)), int(m.group(5))
+            key = "wins" if mine > theirs else "losses" if theirs > mine else "draws"
+            match[key] += 1
+    return {**match, "bo3": True, "game1": game1, "games_2_3": later}
+
+
 # ---------------------------------------------------------------------------
 # 5. Main program
 # ---------------------------------------------------------------------------
@@ -215,13 +273,13 @@ def main() -> None:
     args = get_args()
     start = time.time()
     output, problems, replayed = run_forge(args)
-    result = count_results(output, args.ours)
+    result = count_bo3(output, args.ours) if args.bo3 else count_results(output, args.ours)
     if args.log_out:
         log_path = Path(args.log_out)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(output, encoding="utf-8")
         print(f"Full game log saved to {log_path} ({len(output):,} characters)")
-    played = sum(result.values())
+    played = result["wins"] + result["losses"] + result["draws"]   # games, or matches with --bo3
 
     result.update({
         "ours": args.report_as or args.ours,
