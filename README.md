@@ -19,6 +19,7 @@ use no plan minutes. (The private repo has no workflows on purpose.)
 | `.github/workflows/simulate.yml` | The test workflow (build Forge, play games, save results privately) |
 | `decks/` | The meta opponents (public meta lists) |
 | `scripts/` | Python scripts: run games, summarize, analyze logs, AI audit, card queue |
+| `forge_patches/` | Our fixes to Forge's AI, applied before each build (see its README) |
 | `plans/ai_priorities.json` | Which opponent cards the AI should target first |
 | `session_tools/` | Local helper scripts and public card pool data |
 

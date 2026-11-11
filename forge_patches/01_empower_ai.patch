@@ -1,0 +1,96 @@
+diff --git a/forge-ai/src/main/java/forge/ai/SpellApiToAi.java b/forge-ai/src/main/java/forge/ai/SpellApiToAi.java
+index b830a455..51bad80b 100644
+--- a/forge-ai/src/main/java/forge/ai/SpellApiToAi.java
++++ b/forge-ai/src/main/java/forge/ai/SpellApiToAi.java
+@@ -92,6 +92,7 @@ public enum SpellApiToAi {
+             .put(ApiType.Earthbend, EarthbendAi.class)
+             .put(ApiType.Effect, EffectAi.class)
+             .put(ApiType.Encode, EncodeAi.class)
++            .put(ApiType.Empower, EmpowerAi.class)
+             .put(ApiType.Endure, EndureAi.class)
+             .put(ApiType.EndCombatPhase, EndTurnAi.class)
+             .put(ApiType.EndTurn, EndTurnAi.class)
+diff --git a/forge-ai/src/main/java/forge/ai/ability/EmpowerAi.java b/forge-ai/src/main/java/forge/ai/ability/EmpowerAi.java
+new file mode 100644
+index 00000000..89be33af
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/ability/EmpowerAi.java
+@@ -0,0 +1,78 @@
++package forge.ai.ability;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.Map;
++
++import forge.ai.AiAbilityDecision;
++import forge.ai.AiPlayDecision;
++import forge.ai.SpellAbilityAi;
++import forge.game.card.Card;
++import forge.game.card.CounterEnumType;
++import forge.game.player.Player;
++import forge.game.player.PlayerActionConfirmMode;
++import forge.game.spellability.SpellAbility;
++
++/**
++ * AI logic for "Empower [type] N" (e.g. "Empower Jace 1").
++ *
++ * What Empower does: put N loyalty counters on a [type] token you control.
++ * If you don't control one, first create a blue [type] planeswalker token
++ * with "-1: Surveil 1" and "-3: Draw a card".
++ *
++ * Empower never hurts its controller (it only adds a planeswalker token
++ * and/or loyalty), so the AI should always be willing to do it. Before this
++ * class existed, Empower had no AI mapping, so Forge used CannotPlayAi: the AI
++ * never activated Empower abilities (Jace, Reality Sculptor's +1) and never
++ * cast spells with Empower as a sub-ability (Countersculpt).
++ */
++public class EmpowerAi extends SpellAbilityAi {
++
++    // -----------------------------------------------------------------------
++    // 1. Main ability (e.g. a planeswalker's "+1: Empower Jace X"):
++    //    always worth doing, because it only adds loyalty or a free token.
++    // -----------------------------------------------------------------------
++    @Override
++    protected AiAbilityDecision canPlay(Player aiPlayer, SpellAbility sa) {
++        return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. Sub-ability (e.g. Countersculpt: "Counter target spell. Empower Jace 1."):
++    //    never a reason to hold the spell back, so the main part decides.
++    // -----------------------------------------------------------------------
++    @Override
++    public AiAbilityDecision chkDrawback(Player aiPlayer, SpellAbility sa) {
++        return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. Triggered or forced Empower: always accept.
++    // -----------------------------------------------------------------------
++    @Override
++    protected AiAbilityDecision doTriggerNoCost(Player aiPlayer, SpellAbility sa, boolean mandatory) {
++        return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
++    }
++
++    @Override
++    public boolean confirmAction(Player player, SpellAbility sa, PlayerActionConfirmMode mode, String message, Map<String, Object> params) {
++        return true;
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. With several matching tokens, put the loyalty on the one that
++    //    already has the most (it gets to its -3 "draw a card" soonest and is
++    //    the hardest for the opponent to attack down).
++    // -----------------------------------------------------------------------
++    @Override
++    protected Card chooseSingleCard(Player ai, SpellAbility sa, Iterable<Card> options, boolean isOptional, Player targetedPlayer, Map<String, Object> params) {
++        Card best = null;
++        for (Card c : options) {
++            if (best == null || c.getCounters(CounterEnumType.LOYALTY) > best.getCounters(CounterEnumType.LOYALTY)) {
++                best = c;
++            }
++        }
++        return best;
++    }
++}

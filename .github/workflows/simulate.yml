@@ -142,7 +142,31 @@ jobs:
           git clone --depth 1 https://github.com/Card-Forge/forge forge
           SHA=$(git -C forge rev-parse --short HEAD)
           echo "Forge version: $SHA"
-          echo "cache-key=forge-build-$SHA" >> "$GITHUB_OUTPUT"
+          # Our AI fixes (forge_patches/*.patch) are part of the build, so a new or
+          # changed patch gets its own cached build ("none" when there are no patches)
+          if ls forge_patches/*.patch >/dev/null 2>&1; then
+            PATCHES=$(cat forge_patches/*.patch | sha256sum | cut -c1-12)
+          else
+            PATCHES=none
+          fi
+          echo "AI patches: $PATCHES"
+          echo "cache-key=forge-build-$SHA-p$PATCHES" >> "$GITHUB_OUTPUT"
+
+      - name: Apply our Forge AI fixes (forge_patches/*.patch)
+        run: |
+          # Applied in file-name order (01_, 02_, ...). If Forge changed and a patch
+          # no longer fits, stop here with a clear message instead of quietly
+          # simulating with the unfixed AI.
+          for p in forge_patches/*.patch; do
+            [ -f "$p" ] || continue
+            if git -C forge apply --check "../$p"; then
+              git -C forge apply "../$p"
+              echo "Applied $p"
+            else
+              echo "::error::$p no longer applies to the latest Forge. Update the patch (see forge_patches/README.md)."
+              exit 1
+            fi
+          done
 
       - name: Reuse an earlier Forge build if this version was built before
         id: cache
