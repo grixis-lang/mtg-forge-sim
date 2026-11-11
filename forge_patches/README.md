@@ -7,6 +7,7 @@ the cache key includes a hash of these files.
 | Patch | What it fixes |
 |---|---|
 | `01_empower_ai.patch` | Adds AI logic for **Empower** (e.g. "Empower Jace 1"). Without it Forge used "can't play" for Empower, so the AI never cast spells with Empower in them (Countersculpt, Jace's Machinations) and never used Empower loyalty abilities (Jace, Reality Sculptor's +1). |
+| `02_behold_any_card.patch` | **Behold** costs: the AI only looked for *creatures* to behold, so with 2+ valid non-creature cards (e.g. two Jaces for Countersculpt) it couldn't pay. Now any valid card works (behold-and-exile gives up the least valuable one). |
 
 ## If a patch stops applying
 
