@@ -27,7 +27,7 @@ index 6ede1a98..ddd0f264 100644
      FLAT_MC_RISK_WEIGHT("100"),
      FLAT_MC_OVERRIDE_MAJORITY("50"),
      FLAT_MC_ENABLED("true"),
-+    // Control decks: cast hand disruption (Duress, Soul Search...) on our own turn before holding mana for
++    // Control decks: cast hand disruption (Duress, exile-from-hand spells...) on our own turn before holding mana for
 +    // instants, and only hold mana when no hand disruption can be cast. See HandDisruption.
 +    PRIORITIZE_HAND_DISRUPTION("false"),
      // Sampling efficiency and deck-agnostic valuation. Setting PRUNING/CATEGORY_HOLD/ADAPTIVE_PLAYOUT to false and
@@ -57,8 +57,8 @@ index 00000000..0d3abe15
 + * "Hand disruption first" for control decks (AI profile property PRIORITIZE_HAND_DISRUPTION=true).
 + *
 + * The rule, as a player would say it:
-+ *   1. If a hand-disruption spell (Duress, Soul Search, ...) can be cast on our own turn, cast it:
-+ *      turn 1 Duress, turn 2 Soul Search, always.
++ *   1. If a hand-disruption spell (Duress, exile-from-hand spells, ...) can be cast on our own turn, cast it:
++ *      turn 1 Duress, turn 2 a 2-mana disruption spell, always.
 + *   2. Only keep mana open for instants (counterspells, instant removal) when there is no
 + *      hand-disruption spell left to cast.
 + *
@@ -85,7 +85,7 @@ index 00000000..0d3abe15
 +    // -----------------------------------------------------------------------
 +    // 2. What counts as hand disruption: a spell that makes an opponent
 +    //    discard, or that takes a card from an opponent's hand
-+    //    (e.g. Duress = Discard, Soul Search = ChangeZone from Hand to Exile).
++    //    (e.g. Duress = Discard, exile-from-hand spells = ChangeZone from Hand to Exile).
 +    // -----------------------------------------------------------------------
 +    public static boolean isHandDisruption(final SpellAbility sa) {
 +        if (sa == null || !sa.isSpell() || sa.getApi() == null) {
@@ -166,7 +166,7 @@ index 2f3237c8..aeb8d8a2 100644
          }
  
          // don't use fetching to top of library/graveyard before main2
-+        // (hand disruption such as Soul Search may go in main 1 when PRIORITIZE_HAND_DISRUPTION is on)
++        // (hand disruption such as exile-from-hand spells may go in main 1 when PRIORITIZE_HAND_DISRUPTION is on)
          if (ai.getGame().getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
 -                && !sa.hasParam("ActivationPhases")) {
 +                && !sa.hasParam("ActivationPhases")
@@ -204,7 +204,7 @@ index b568aa40..16e000fc 100644
              return false;
          }
          final int mana = ComputerUtilMana.getAvailableManaEstimate(player, true);
-+        // PRIORITIZE_HAND_DISRUPTION: cast the Duress / Soul Search first, hold mana only when there is none
++        // PRIORITIZE_HAND_DISRUPTION: cast the hand disruption first, hold mana only when there is none
 +        if (HandDisruption.hasCastableInHand(player, mana)) {
 +            return false;
 +        }

@@ -21,10 +21,10 @@ index ddd0f26..bd7af75 100644
 --- a/forge-ai/src/main/java/forge/ai/AiProps.java
 +++ b/forge-ai/src/main/java/forge/ai/AiProps.java
 @@ -165,6 +165,9 @@ public enum AiProps {
-     // Control decks: cast hand disruption (Duress, Soul Search...) on our own turn before holding mana for
+     // Control decks: cast hand disruption (Duress, exile-from-hand spells...) on our own turn before holding mana for
      // instants, and only hold mana when no hand disruption can be cast. See HandDisruption.
      PRIORITIZE_HAND_DISRUPTION("false"),
-+    // Remember cards seen in an opponent's hand (Duress, Soul Search, reveals) until they leave it, use them in
++    // Remember cards seen in an opponent's hand (Duress, exile-from-hand spells, reveals) until they leave it, use them in
 +    // look-ahead rollouts, and take the card our own hand can't answer. See OpponentHandMemory.
 +    REMEMBER_OPPONENT_HAND("false"),
      // Sampling efficiency and deck-agnostic valuation. Setting PRUNING/CATEGORY_HOLD/ADAPTIVE_PLAYOUT to false and
@@ -193,7 +193,7 @@ index 0000000..b209582
 +    }
 +
 +    // -----------------------------------------------------------------------
-+    // 5. Choosing what to take with Duress / Soul Search: the most dangerous
++    // 5. Choosing what to take with Duress / exile-from-hand spells: the most dangerous
 +    //    card that our own hand can NOT answer. Rough danger score:
 +    //    mana value, plus a bonus by card type (planeswalkers and creatures
 +    //    first), minus a lot if we already hold an answer to it.
@@ -298,7 +298,7 @@ index da17732..e69258f 100644
          if (delayedReveal != null) {
              reveal(delayedReveal);
          }
-+        // REMEMBER_OPPONENT_HAND: taking a card from an opponent's hand (e.g. Soul Search)
++        // REMEMBER_OPPONENT_HAND: taking a card from an opponent's hand (e.g. an exile-from-hand spell)
 +        final OpponentHandMemory mem = OpponentHandMemory.of(player);
 +        if (mem != null && origin != null && origin.contains(ZoneType.Hand) && !fetchList.isEmpty()
 +                && fetchList.allMatch(c -> c.getOwner() != null && c.getOwner().isOpponentOf(player))) {
@@ -319,7 +319,7 @@ index aeb8d8a..008f58f 100644
          }
          final String destination = sa.getParam("Destination");
  
-+        // REMEMBER_OPPONENT_HAND: e.g. Soul Search into a known hand with nothing to take
++        // REMEMBER_OPPONENT_HAND: e.g. an exile-from-hand spell into a known hand with nothing to take
 +        if (HandDisruption.isHandDisruption(sa) && OpponentHandMemory.pointless(ai, sa)) {
 +            return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
 +        }
