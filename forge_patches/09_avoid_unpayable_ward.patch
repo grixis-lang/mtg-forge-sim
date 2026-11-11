@@ -1,0 +1,218 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index da00b11..5324124 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -944,6 +944,11 @@ public class AiController {
+     }
+ 
+     private AiPlayDecision canPlayAndPayFor(final SpellAbility sa) {
++        // AVOID_UNPAYABLE_WARD: while deciding, skip targets whose ward we can't pay
++        return WardTargeting.deciding(player, () -> canPlayAndPayForDeciding(sa));
++    }
++
++    private AiPlayDecision canPlayAndPayForDeciding(final SpellAbility sa) {
+         AITimeoutTracker.check();
+         final Card host = sa.getHostCard();
+ 
+@@ -3010,8 +3015,14 @@ public class AiController {
+     public boolean doTrigger(SpellAbility sa, boolean mandatory) {
+         if (sa instanceof WrappedAbility)
+             return doTrigger(((WrappedAbility) sa).getWrappedAbility(), mandatory);
+-        if (sa.getApi() != null)
+-            return SpellApiToAi.Converter.get(sa).doTrigger(player, sa, mandatory);
++        if (sa.getApi() != null) {
++            if (mandatory) {
++                // a mandatory trigger must still pick a legal target, so no ward veto here
++                return SpellApiToAi.Converter.get(sa).doTrigger(player, sa, true);
++            }
++            // AVOID_UNPAYABLE_WARD: an optional trigger skips targets whose ward we can't pay
++            return WardTargeting.deciding(player, () -> SpellApiToAi.Converter.get(sa).doTrigger(player, sa, false));
++        }
+         if (sa.getPayCosts().isFree() && !sa.usesTargeting()) {
+             // For non-converted triggers (such as Cumulative Upkeep) that don't have costs or targets to worry about
+             return true;
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index 3feda83..6ec0ebe 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -85,6 +85,9 @@ public enum AiProps {
+     DESTROY_IMMEDIATELY_UNBLOCKABLE_ONLY_IN_DNGR ("true"),
+     DESTROY_IMMEDIATELY_UNBLOCKABLE_LIFE_IN_DNGR ("5"),
+     AVOID_TARGETING_CREATS_THAT_WILL_DIE ("true"),
++    // While deciding, treat an opponent's warded permanent as untargetable when we can't or shouldn't pay
++    // its ward, so the AI picks another target instead of not casting. See WardTargeting.
++    AVOID_UNPAYABLE_WARD ("false"),
+     DONT_EVAL_KILLSPELLS_ON_STACK_WITH_PERMISSION ("true"),
+     CHANCE_TO_CHAIN_TWO_DAMAGE_SPELLS("50"),
+     HOLD_X_DAMAGE_SPELLS_FOR_MORE_DAMAGE_CHANCE("100"),
+diff --git a/forge-ai/src/main/java/forge/ai/WardTargeting.java b/forge-ai/src/main/java/forge/ai/WardTargeting.java
+new file mode 100644
+index 0000000..081fca0
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/WardTargeting.java
+@@ -0,0 +1,139 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.function.Supplier;
++
++import forge.game.GameObject;
++import forge.game.card.Card;
++import forge.game.cost.Cost;
++import forge.game.cost.CostPart;
++import forge.game.cost.CostPayLife;
++import forge.game.keyword.Keyword;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++
++/**
++ * "Pick another target when we can't pay its ward" (AI profile property AVOID_UNPAYABLE_WARD=true).
++ *
++ * Forge's AI picks a target first and checks the ward cost only afterwards
++ * (ComputerUtilCost: "ideally, this should be done while targeting"). If it can't or won't
++ * pay, it doesn't cast the spell at all, even when another good target was available.
++ *
++ * With this setting on, while OUR AI is deciding what to target, a creature/permanent whose
++ * ward we can't or shouldn't pay counts as "not targetable" - like hexproof - so the AI's
++ * normal targeting picks the next best target instead.
++ *
++ * It only applies during the AI's decision (a thread-local flag set by AiController), never
++ * when a spell actually resolves, so the game's real targeting rules are unchanged.
++ * Off by default, so only decks whose profile turns it on are affected.
++ */
++public final class WardTargeting {
++
++    private WardTargeting() {
++    }
++
++    // true while this thread's AI is deciding a play (set by AiController)
++    private static final ThreadLocal<Player> DECIDING = new ThreadLocal<>();
++    private static volatile boolean installed = false;
++
++    // Forge's own "too low to pay life" level for costs (ComputerUtilCost uses 4)
++    private static final int MIN_LIFE_AFTER = 4;
++
++    // -----------------------------------------------------------------------
++    // 1. Hook into Forge's target check once (SpellAbility.canTarget asks us)
++    // -----------------------------------------------------------------------
++    private static void install() {
++        if (!installed) {
++            SpellAbility.aiTargetVeto = WardTargeting::veto;
++            installed = true;
++        }
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. Run an AI decision with the check switched on for this player
++    //    (only when the player's profile turns the setting on)
++    // -----------------------------------------------------------------------
++    public static <T> T deciding(final Player ai, final Supplier<T> decision) {
++        if (!(ai.getController() instanceof PlayerControllerAi pc)
++                || !pc.getAi().getBoolProperty(AiProps.AVOID_UNPAYABLE_WARD)) {
++            return decision.get();
++        }
++        install();
++        final Player before = DECIDING.get();
++        DECIDING.set(ai);
++        try {
++            return decision.get();
++        } finally {
++            if (before == null) {
++                DECIDING.remove();
++            } else {
++                DECIDING.set(before);
++            }
++        }
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. The veto: true = "treat this target as not targetable right now"
++    // -----------------------------------------------------------------------
++    private static boolean veto(final SpellAbility sa, final GameObject target) {
++        final Player ai = DECIDING.get();
++        if (ai == null || !(target instanceof Card c)) {
++            return false;
++        }
++        // only our own spells/abilities, aimed at an opponent's warded permanent on the battlefield
++        if (sa.getActivatingPlayer() != null && !ai.equals(sa.getActivatingPlayer())) {
++            return false;
++        }
++        if (!c.isInPlay() || !c.hasKeyword(Keyword.WARD) || c.getController() == null
++                || !c.getController().isOpponentOf(ai)) {
++            return false;
++        }
++        return !canAffordWard(ai, sa, c);
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. Can and will we pay this permanent's ward on top of the spell's own cost?
++    //    - mana ward: enough mana for the spell plus the ward
++    //    - life ward: the spell's own life cost plus the ward leaves us at 4+ life
++    //    - other ward costs (discard, sacrifice...): Forge's usual "will I pay this?" check
++    // -----------------------------------------------------------------------
++    private static boolean canAffordWard(final Player ai, final SpellAbility sa, final Card warded) {
++        final Cost ward = ComputerUtilCard.getTotalWardCost(warded);
++        final SpellAbility root = sa.getRootAbility();
++        final Cost own = root.getPayCosts();
++
++        if (ward.hasManaCost()) {
++            final int ownMana = own != null && own.hasManaCost() ? own.getTotalMana().getCMC() : 0;
++            final int need = ownMana + ward.getTotalMana().getCMC();
++            if (ComputerUtilMana.getAvailableManaEstimate(ai, false) < need) {
++                return false;
++            }
++        }
++
++        final int wardLife = lifeIn(ward, root);
++        if (wardLife > 0) {
++            final int ownLife = lifeIn(own, root);
++            if (ai.getLife() - ownLife - wardLife < MIN_LIFE_AFTER && !ai.cantLoseForZeroOrLessLife()) {
++                return false;
++            }
++        }
++
++        // the other parts (discard, sacrifice, ...) the way Forge itself judges a ward cost
++        final SpellAbilityAi judge = new SpellAbilityAi() { };
++        return judge.willPayCosts(ai, root, ward, root.getHostCard());
++    }
++
++    private static int lifeIn(final Cost cost, final SpellAbility sa) {
++        int total = 0;
++        if (cost != null) {
++            for (final CostPart part : cost.getCostParts()) {
++                if (part instanceof CostPayLife payLife) {
++                    total += payLife.getAbilityAmount(sa);
++                }
++            }
++        }
++        return total;
++    }
++}
+diff --git a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
+index 30480a9..f1aa864 100644
+--- a/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
++++ b/forge-game/src/main/java/forge/game/spellability/SpellAbility.java
+@@ -1379,10 +1379,21 @@ public abstract class SpellAbility extends CardTraitBase implements ISpellAbilit
+     public final boolean canTarget(final GameObject entity) {
+         return canTarget(entity, false);
+     }
++
++    /**
++     * Optional AI-side veto, used only while an AI is deciding what to target (never on
++     * fizzle checks). Set by forge.ai.WardTargeting (AI profile setting AVOID_UNPAYABLE_WARD):
++     * returns true for targets the AI should treat as not targetable right now.
++     */
++    public static volatile java.util.function.BiPredicate<SpellAbility, GameObject> aiTargetVeto = null;
++
+     public final boolean canTarget(final GameObject entity, boolean fizzleCheck) {
+         if (entity == null) {
+             return false;
+         }
++        if (!fizzleCheck && aiTargetVeto != null && aiTargetVeto.test(this, entity)) {
++            return false;
++        }
+ 
+         final SpellAbility rootAbility = this.getRootAbility();
+         // 115.5. A spell or ability on the stack is an illegal target for itself.
