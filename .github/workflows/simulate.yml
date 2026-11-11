@@ -62,7 +62,7 @@ on:
         default: ""
         required: false
       shards:
-        description: "Split each matchup into this many jobs that run at the same time (faster; max 20 jobs run at once)"
+        description: "Split each matchup into this many jobs. Only one job runs at a time (max-parallel 1), so keep this at 1"
         default: "1"
         required: true
 
@@ -283,6 +283,10 @@ jobs:
     timeout-minutes: 340
     strategy:
       fail-fast: false            # one broken matchup shouldn't stop the others
+      # Rule (user, 2026-11-11): only ONE game job runs at a time, so matchups play
+      # one opponent after another instead of all at once. Slower, but each job has
+      # the machine to itself. Shards of the same opponent also run one after another.
+      max-parallel: 1
       matrix:
         opponent: ${{ fromJSON(needs.build.outputs.opponents) }}
         shard: ${{ fromJSON(needs.build.outputs.shards) }}

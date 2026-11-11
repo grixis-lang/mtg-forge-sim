@@ -153,7 +153,7 @@ def main() -> None:
     ap.add_argument("--profile", required=True,
                     help="our AI profile name (a file in the private repo's engine/ai_profiles/)")
     ap.add_argument("--games", type=int, default=50)
-    ap.add_argument("--shards", type=int, default=2)
+    ap.add_argument("--shards", type=int, default=1)   # one job at a time anyway (max-parallel 1)
     ap.add_argument("--private", default="../mtg-private-list", help="local clone of MTG-Private-List")
     args = ap.parse_args()
 
