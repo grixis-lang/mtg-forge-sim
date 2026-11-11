@@ -1,0 +1,156 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index ddd0f26..3feda83 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -63,6 +63,9 @@ public enum AiProps {
+     CHUMP_TO_SAVE_PLANESWALKER_ONLY_ON_LETHAL ("true"),
+     TRY_TO_PRESERVE_BUYBACK_SPELLS ("true"),
+     MIN_SPELL_CMC_TO_COUNTER ("0"),
++    // Counter a cheap permanent spell (below MIN_SPELL_CMC_TO_COUNTER) when no removal in our hand could
++    // answer it later. See CheapSpellAnswers.
++    COUNTER_CHEAP_IF_NO_ANSWER ("false"),
+     CHANCE_TO_COUNTER_CMC_1 ("50"),
+     CHANCE_TO_COUNTER_CMC_2 ("75"),
+     CHANCE_TO_COUNTER_CMC_3 ("100"),
+diff --git a/forge-ai/src/main/java/forge/ai/CheapSpellAnswers.java b/forge-ai/src/main/java/forge/ai/CheapSpellAnswers.java
+new file mode 100644
+index 0000000..1d072b7
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/CheapSpellAnswers.java
+@@ -0,0 +1,119 @@
++package forge.ai;
++
++// ---------------------------------------------------------------------------
++// Imports
++// ---------------------------------------------------------------------------
++import java.util.ArrayList;
++import java.util.EnumSet;
++import java.util.List;
++import java.util.Set;
++
++import forge.game.ability.ApiType;
++import forge.game.card.Card;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++import forge.game.spellability.TargetRestrictions;
++import forge.game.trigger.Trigger;
++import forge.game.zone.ZoneType;
++
++/**
++ * "Counter a cheap threat when we have no other answer" (AI profile property
++ * COUNTER_CHEAP_IF_NO_ANSWER=true).
++ *
++ * Forge normally lets cheap spells (below MIN_SPELL_CMC_TO_COUNTER) resolve unless they
++ * are removal, burn, a counterspell or on the profile's named list. Letting a cheap
++ * creature or equipment through is only right when we can deal with it later. So, like a
++ * control player, before letting a cheap permanent spell resolve the AI looks at its own
++ * hand: if no removal in hand could handle it once it's on the battlefield, counter it now.
++ *
++ * Counterspells in our hand don't count as an answer here: we're deciding whether to use one.
++ * Off by default, so only decks whose profile turns it on are affected.
++ */
++public final class CheapSpellAnswers {
++
++    private CheapSpellAnswers() {
++    }
++
++    // effects that deal with a permanent once it is on the battlefield
++    private static final Set<ApiType> REMOVAL = EnumSet.of(ApiType.Destroy, ApiType.DestroyAll,
++            ApiType.ChangeZone, ApiType.ChangeZoneAll, ApiType.Sacrifice, ApiType.SacrificeAll,
++            ApiType.DealDamage, ApiType.DamageAll);
++
++    // -----------------------------------------------------------------------
++    // 1. Main check, used by CounterAi for spells below MIN_SPELL_CMC_TO_COUNTER:
++    //    true = counter this cheap spell, because nothing in our hand answers it later.
++    // -----------------------------------------------------------------------
++    public static boolean counterBecauseNoAnswer(final Player ai, final Card spellCard) {
++        if (!(ai.getController() instanceof PlayerControllerAi pc)
++                || !pc.getAi().getBoolProperty(AiProps.COUNTER_CHEAP_IF_NO_ANSWER)) {
++            return false;
++        }
++        // Only permanents (creatures, equipment, enchantments...) stay around to be answered
++        // later. Cheap instants and sorceries are handled by Forge's own rules (removal,
++        // burn and counterspells are always countered).
++        if (spellCard == null || !spellCard.isPermanent() || spellCard.isLand()) {
++            return false;
++        }
++        if (spellCard.getController() != null && !spellCard.getController().isOpponentOf(ai)) {
++            return false;
++        }
++        return !handHasRemovalFor(ai, spellCard);
++    }
++
++    // -----------------------------------------------------------------------
++    // 2. Does any card in our hand have removal that could hit this card once it is
++    //    on the battlefield? Looks at the card's spell (e.g. Requiting Hex, Get Lost)
++    //    and its "when this enters" triggers (e.g. Seam Rip), including follow-up parts.
++    // -----------------------------------------------------------------------
++    public static boolean handHasRemovalFor(final Player ai, final Card threat) {
++        for (final Card ours : ai.getCardsIn(ZoneType.Hand)) {
++            if (ours.isLand()) {
++                continue;
++            }
++            for (final SpellAbility sa : abilitiesOf(ours)) {
++                for (SpellAbility part = sa; part != null; part = part.getSubAbility()) {
++                    if (answers(ai, ours, part, threat)) {
++                        return true;
++                    }
++                }
++            }
++        }
++        return false;
++    }
++
++    // -----------------------------------------------------------------------
++    // 3. The abilities a card in hand brings: its spells plus its triggers
++    //    (enters-the-battlefield removal like Seam Rip is a trigger, not a spell).
++    // -----------------------------------------------------------------------
++    private static List<SpellAbility> abilitiesOf(final Card c) {
++        final List<SpellAbility> result = new ArrayList<>(c.getSpellAbilities());
++        for (final Trigger t : c.getTriggers()) {
++            final SpellAbility sa = t.ensureAbility();
++            if (sa != null) {
++                result.add(sa);
++            }
++        }
++        return result;
++    }
++
++    // -----------------------------------------------------------------------
++    // 4. Can this one ability deal with the threat on the battlefield?
++    // -----------------------------------------------------------------------
++    private static boolean answers(final Player ai, final Card ours, final SpellAbility sa, final Card threat) {
++        if (sa.getApi() == null || !REMOVAL.contains(sa.getApi())) {
++            return false;
++        }
++        // ChangeZone only counts when it moves a card OFF the battlefield (exile/bounce),
++        // not e.g. Soul Search taking a card from a hand
++        if ((sa.getApi() == ApiType.ChangeZone || sa.getApi() == ApiType.ChangeZoneAll)
++                && !"Battlefield".equals(sa.getParamOrDefault("Origin", ""))) {
++            return false;
++        }
++        final TargetRestrictions tr = sa.getTargetRestrictions();
++        if (tr == null) {
++            // untargeted: only a "destroy/damage all creatures" counts, and only against creatures
++            return threat.isCreature() && (sa.getApi() == ApiType.DestroyAll || sa.getApi() == ApiType.DamageAll);
++        }
++        return threat.isValid(tr.getValidTgts(), ai, ours, sa);
++    }
++}
+diff --git a/forge-ai/src/main/java/forge/ai/ability/CounterAi.java b/forge-ai/src/main/java/forge/ai/ability/CounterAi.java
+index 8597aaa..f002a7d 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/CounterAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/CounterAi.java
+@@ -187,6 +187,12 @@ public class CounterAi extends SpellAbilityAi {
+                 }
+             }
+ 
++            // COUNTER_CHEAP_IF_NO_ANSWER: letting a cheap creature/equipment resolve is only right
++            // when our hand holds removal for it; with no answer in hand, counter it now
++            if (dontCounter && CheapSpellAnswers.counterBecauseNoAnswer(ai, tgtSource)) {
++                dontCounter = false;
++            }
++
+             // should not refrain from countering a CMC X spell if that's the only CMC
+             // counterable with that particular counterspell type (e.g. Mental Misstep vs. CMC 1 spells)
+             if (sa.getParamOrDefault("ValidTgts", "").startsWith("Card.cmcEQ")) {

@@ -10,6 +10,7 @@ the cache key includes a hash of these files.
 | `02_behold_any_card.patch` | **Behold** costs: the AI only looked for *creatures* to behold, so with 2+ valid non-creature cards (e.g. two Jaces for Countersculpt) it couldn't pay. Now any valid card works (behold-and-exile gives up the least valuable one). |
 | `03_log_opening_hand.patch` | Logs each player's kept opening hand ("Mulligan: <player> opening hand: A ; B ; ...") so `analyze_logs.py` can report win rate by opening hand. Logging only, no change to play. |
 | `04_hand_disruption_first.patch` | New AI profile setting `PRIORITIZE_HAND_DISRUPTION` (off by default). When on: cast hand disruption (Duress, Soul Search...) on our own turn before anything else, also in main phase 1, and only hold mana for instants when no hand disruption can be cast. |
+| `07_counter_cheap_if_no_answer.patch` | New AI profile setting `COUNTER_CHEAP_IF_NO_ANSWER` (off by default). When on: a cheap creature/equipment/other permanent (below `MIN_SPELL_CMC_TO_COUNTER`) is countered if no removal in our hand (spell or enters-the-battlefield trigger, e.g. Seam Rip) could handle it later. (06 is used by the bo3-test branch.) |
 
 ## If a patch stops applying
 
