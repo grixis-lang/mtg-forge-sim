@@ -1,8 +1,8 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
-index 0fd6cee9..da00b112 100644
+index fdafae0..8c08a3b 100644
 --- a/forge-ai/src/main/java/forge/ai/AiController.java
 +++ b/forge-ai/src/main/java/forge/ai/AiController.java
-@@ -2121,6 +2121,16 @@ public class AiController {
+@@ -2188,6 +2188,16 @@ public class AiController {
              }
          }
  
@@ -20,7 +20,7 @@ index 0fd6cee9..da00b112 100644
          lastFlatMcResult = null;
          if (reactiveMode != null) {
 diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
-index 6ede1a98..ddd0f264 100644
+index 6ede1a9..aa17b72 100644
 --- a/forge-ai/src/main/java/forge/ai/AiProps.java
 +++ b/forge-ai/src/main/java/forge/ai/AiProps.java
 @@ -162,6 +162,9 @@ public enum AiProps {
@@ -35,7 +35,7 @@ index 6ede1a98..ddd0f264 100644
      FLAT_MC_EXTRA_ROUNDS("2"),
 diff --git a/forge-ai/src/main/java/forge/ai/HandDisruption.java b/forge-ai/src/main/java/forge/ai/HandDisruption.java
 new file mode 100644
-index 00000000..0d3abe15
+index 0000000..54188ee
 --- /dev/null
 +++ b/forge-ai/src/main/java/forge/ai/HandDisruption.java
 @@ -0,0 +1,119 @@
@@ -159,23 +159,23 @@ index 00000000..0d3abe15
 +    }
 +}
 diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-index 2f3237c8..aeb8d8a2 100644
+index 386fb09..6f7f681 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-@@ -412,8 +412,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
-         }
- 
+@@ -414,8 +414,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
          // don't use fetching to top of library/graveyard before main2
+         // (a tutor that only reveals the cards and hands them on with a follow-up, Gifts Ungiven, is a tutor to hand)
+         final boolean revealsForPile = sa.hasParam("RememberChanged") && sa.getSubAbility() != null;
 +        // (hand disruption such as exile-from-hand spells may go in main 1 when PRIORITIZE_HAND_DISRUPTION is on)
          if (ai.getGame().getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
--                && !sa.hasParam("ActivationPhases")) {
-+                && !sa.hasParam("ActivationPhases")
+-                && !sa.hasParam("ActivationPhases") && !revealsForPile) {
++                && !sa.hasParam("ActivationPhases") && !revealsForPile
 +                && !(HandDisruption.isEnabled(ai) && HandDisruption.isHandDisruption(sa))) {
              if (!destination.equals("Battlefield") && !destination.equals("Hand")) {
                  return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
              }
 diff --git a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
-index f1b70865..030403bb 100644
+index f1b7086..030403b 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 @@ -116,7 +116,8 @@ public class DiscardAi extends SpellAbilityAi {
@@ -189,10 +189,10 @@ index f1b70865..030403bb 100644
          }
  
 diff --git a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-index b568aa40..16e000fc 100644
+index 4f7264d..a2149f0 100644
 --- a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
 +++ b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-@@ -5,6 +5,7 @@ import forge.ai.AiProps;
+@@ -6,6 +6,7 @@ import forge.ai.AiProps;
  import forge.ai.ComputerUtil;
  import forge.ai.ComputerUtilCombat;
  import forge.ai.ComputerUtilMana;
@@ -200,7 +200,7 @@ index b568aa40..16e000fc 100644
  import forge.ai.PlayerControllerAi;
  import forge.ai.simulation.GameStateEvaluator.Score;
  import forge.game.Game;
-@@ -1548,6 +1549,10 @@ public final class FlatMonteCarloPicker {
+@@ -1623,6 +1624,10 @@ public final class FlatMonteCarloPicker {
              return false;
          }
          final int mana = ComputerUtilMana.getAvailableManaEstimate(player, true);
