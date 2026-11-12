@@ -326,7 +326,9 @@ def main() -> None:
         "ours": args.report_as or args.ours,
         "opponent": args.opponent,
         # True when the opponent played a sideboarded copy (games 2-3 against us)
-        "opponent_sideboarded": bool(args.opponent_deck and args.opponent_deck != args.opponent),
+        # (best-of-3: their games 2-3 deck is --opponent-sb; otherwise --opponent-deck)
+        "opponent_sideboarded": bool((args.opponent_sb if args.bo3 else args.opponent_deck)
+                                     and (args.opponent_sb if args.bo3 else args.opponent_deck) != args.opponent),
         "games_requested": args.games,
         "games_played": played,
         "ai": args.ai,
