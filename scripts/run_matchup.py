@@ -35,6 +35,7 @@ import json                 # saves results in a simple, readable format
 import re                   # finds the "Game Result" lines in Forge's output
 import subprocess           # starts Forge (a Java program) from Python
 import sys
+import threading         # reads each Forge copy's output while it runs (live progress)
 import time
 from pathlib import Path
 
@@ -156,16 +157,56 @@ def run_batches(args: argparse.Namespace, batches: list[int]) -> list[tuple[int,
             print(f"Running batch {i + 1}/{len(batches)} ({games} {unit}):", " ".join(command), flush=True)
         running.append((games, subprocess.Popen(command, cwd=args.forge_gui,   # Forge looks for res/ here
                                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)))
-    finished = []
+    # Read every copy's output line by line while it plays, so the job log can
+    # show live progress ("game 5 of 13 finished"). Only counts are printed:
+    # never winners, cards or deck names (this repo's logs are public).
+    readers = []
     for i, (games, proc) in enumerate(running):
+        out_lines, err_lines = [], []
+        label = f"Batch {i + 1}/{len(running)}"
+        t_out = threading.Thread(target=read_progress, daemon=True,
+                                 args=(proc.stdout, out_lines, label, games, args.bo3))
+        t_err = threading.Thread(target=read_all, daemon=True, args=(proc.stderr, err_lines))
+        t_out.start(); t_err.start()
+        readers.append((games, proc, t_out, t_err, out_lines, err_lines))
+
+    finished = []
+    deadline = time.time() + overall_limit
+    for games, proc, t_out, t_err, out_lines, err_lines in readers:
         try:
-            out, err = proc.communicate(timeout=overall_limit)
+            proc.wait(timeout=max(1, deadline - time.time()))
         except subprocess.TimeoutExpired:
             proc.kill()
-            out, err = proc.communicate()
-            err += "\n[run_matchup] batch hit the overall time limit and was stopped"
-        finished.append((games, out + "\n" + err, proc.returncode))
+            proc.wait()
+            err_lines.append("[run_matchup] batch hit the overall time limit and was stopped")
+        t_out.join(timeout=30); t_err.join(timeout=30)   # let the readers catch the last lines
+        finished.append((games, "\n".join(out_lines) + "\n" + "\n".join(err_lines), proc.returncode))
     return finished
+
+
+def read_all(stream, lines: list[str]) -> None:
+    """Collect everything a stream prints (used for Forge's error output)."""
+    for line in stream:
+        lines.append(line.rstrip("\n"))
+
+
+def read_progress(stream, lines: list[str], label: str, total: int, bo3: bool) -> None:
+    """Collect Forge's output and print one progress line per finished game
+    (and per finished match with --bo3). Counts only, no results."""
+    games_done = matches_done = 0
+    for line in stream:
+        line = line.rstrip("\n")
+        lines.append(line)
+        if WIN_LINE.search(line) or DRAW_LINE.search(line):
+            games_done += 1
+            if bo3:
+                number = int((WIN_LINE.search(line) or DRAW_LINE.search(line)).group(1))
+                print(f"{label}: match {matches_done + 1} of {total}, game {number} finished", flush=True)
+            else:
+                print(f"{label}: game {games_done} of {total} finished", flush=True)
+        elif bo3 and MATCH_LINE.search(line):
+            matches_done += 1
+            print(f"{label}: match {matches_done} of {total} finished ({games_done} games so far)", flush=True)
 
 
 def is_end_line(line: str, bo3: bool) -> bool:
