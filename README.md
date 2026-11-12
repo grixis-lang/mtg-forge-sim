@@ -19,6 +19,7 @@ use no plan minutes. (The private repo has no workflows on purpose.)
 | `.github/workflows/simulate.yml` | The test workflow (build Forge, play games, save results privately) |
 | `decks/` | The meta opponents (public meta lists) |
 | `new_decks/` | More meta lists (75 cards each), not yet used as opponents. Move a file into `decks/` to make it an opponent |
+| `run_requests/go.txt` | Push a request id here to start a test without a GitHub login (settings live in the private repo's `run_queue/<id>.json`; see `.github/workflows/run_request.yml`) |
 | `scripts/` | Python scripts: run games, summarize, analyze logs, AI audit, card queue |
 | `forge_patches/` | Our fixes to Forge's AI, applied before each build (see its README) |
 | `plans/ai_priorities.json` | Which opponent cards the AI should target first |

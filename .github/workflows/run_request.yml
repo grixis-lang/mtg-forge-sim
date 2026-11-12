@@ -1,0 +1,79 @@
+# ---------------------------------------------------------------------------
+# Run request: start a test by pushing a file (for sessions without a GitHub login)
+#
+# How to ask for a test:
+#   1. In the PRIVATE repo, save run_queue/<id>.json with the test's settings
+#      (see scripts/run_request.py for an example). Deck names stay private.
+#   2. In THIS repo, write the same <id> into run_requests/go.txt and push to main.
+# This workflow then checks the settings against our rules, waits until no other
+# test is running (user rule: one test at a time), and starts "Simulate matchups"
+# with GitHub's built-in token. No extra password or secret is needed beyond the
+# PRIVATE_REPO_TOKEN the simulate workflow already uses.
+# ---------------------------------------------------------------------------
+name: Run request
+
+on:
+  push:
+    branches: [main]
+    paths: ["run_requests/go.txt"]
+
+permissions:
+  contents: read    # read this repo
+  actions: write    # start the "Simulate matchups" workflow
+
+# Requests are handled one at a time, in order
+concurrency:
+  group: run-request
+  cancel-in-progress: false
+
+jobs:
+  start-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340          # long enough to wait for a running test to finish
+    steps:
+      - name: Get our scripts
+        uses: actions/checkout@v4
+
+      - name: Read the request id (only an id is public, never deck names)
+        id: req
+        run: |
+          ID=$(tr -d '[:space:]' < run_requests/go.txt)
+          [[ "$ID" =~ ^[a-z0-9_-]+$ ]] || { echo "::error::run_requests/go.txt must hold one id (a-z, 0-9, _ and -)"; exit 1; }
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Get the private repo (the request's settings are there)
+        uses: actions/checkout@v4
+        with:
+          repository: grixis-lang/MTG-Private-List
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+          persist-credentials: false   # this job only reads it
+
+      - name: Check the request against our rules
+        env:
+          ID: ${{ steps.req.outputs.id }}
+        # Prints ::add-mask:: for our deck and profile names, then checks every setting
+        run: python3 scripts/run_request.py "private/run_queue/$ID.json" dispatch.txt
+
+      - name: Wait until no other test is running (one test at a time)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 320); do        # up to about 5 hours 20 minutes
+            BUSY=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow simulate.yml --limit 20 \
+                     --json status --jq '[.[] | select(.status != "completed")] | length')
+            [ "$BUSY" = "0" ] && exit 0
+            echo "A test is still running ($BUSY); checking again in 60 seconds"
+            sleep 60
+          done
+          echo "::error::Another test was still running after 5 hours; push the request again later"; exit 1
+
+      - name: Start the test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REF=$(head -n 1 dispatch.txt)
+          ARGS=()
+          while IFS= read -r line; do ARGS+=(-f "$line"); done < <(tail -n +2 dispatch.txt)
+          gh workflow run simulate.yml --repo "$GITHUB_REPOSITORY" --ref "$REF" "${ARGS[@]}"
+          echo "Test started on branch $REF."
