@@ -11,5 +11,16 @@
       "Burst Lightning": 2,
       "Sleight of Hand": 2
     }
+  },
+  "midrange": {
+    "_why": "Sunspine Lynx stops lifegain; Fire Magic sweeps small creatures. Cuts cantrips.",
+    "in": {
+      "Sunspine Lynx": 2,
+      "Fire Magic": 2
+    },
+    "out": {
+      "Sleight of Hand": 2,
+      "Opt": 2
+    }
   }
 }

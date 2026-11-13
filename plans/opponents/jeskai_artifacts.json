@@ -14,5 +14,15 @@
       "Authority of the Consuls": 2,
       "Braided Net": 1
     }
+  },
+  "midrange": {
+    "_why": "More board wipes vs a creature deck.",
+    "in": {
+      "Day of Judgment": 2
+    },
+    "out": {
+      "Braided Net": 1,
+      "Clay-Fired Bricks": 1
+    }
   }
 }

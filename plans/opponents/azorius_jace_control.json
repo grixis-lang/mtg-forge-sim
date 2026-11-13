@@ -16,5 +16,16 @@
       "Island": 1,
       "Plains": 1
     }
+  },
+  "midrange": {
+    "_why": "Another sweeper and a counter for green spells.",
+    "in": {
+      "Ultima": 1,
+      "Flashfreeze": 1
+    },
+    "out": {
+      "Mathemagics": 1,
+      "Jace's Machinations": 1
+    }
   }
 }

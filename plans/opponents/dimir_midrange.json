@@ -12,5 +12,16 @@
       "Shoot the Sheriff": 2,
       "Floodpits Drowner": 1
     }
+  },
+  "midrange": {
+    "_why": "More creature removal (edict also exiles the graveyard) instead of soft counters.",
+    "in": {
+      "Strategic Betrayal": 2,
+      "Requiting Hex": 1
+    },
+    "out": {
+      "We Say Thee Nay!": 2,
+      "Spell Snare": 1
+    }
   }
 }

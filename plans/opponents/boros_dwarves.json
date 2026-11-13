@@ -9,5 +9,14 @@
       "Chainsaw": 2,
       "Basilisk Collar": 2
     }
+  },
+  "midrange": {
+    "_why": "Sheltered by Ghosts removes a blocker and protects a threat.",
+    "in": {
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Skateboard": 2
+    }
   }
 }

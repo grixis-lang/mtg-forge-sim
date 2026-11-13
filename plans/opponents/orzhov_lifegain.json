@@ -12,5 +12,15 @@
       "Liliana the Faultless": 2,
       "Erode": 1
     }
+  },
+  "midrange": {
+    "_why": "A sweeper and an edict vs a creature midrange deck; cuts Aunt May.",
+    "in": {
+      "Vicious Rivalry": 1,
+      "Strategic Betrayal": 1
+    },
+    "out": {
+      "Aunt May": 2
+    }
   }
 }

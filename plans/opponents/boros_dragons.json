@@ -13,5 +13,18 @@
       "Magda, the Hoardmaster": 1,
       "Twinmaw Stormbrood": 1
     }
+  },
+  "midrange": {
+    "_why": "More creature removal and permanent answers vs a creature midrange deck; cuts the weakest threats.",
+    "in": {
+      "Get Lost": 2,
+      "Solitary Cell": 1,
+      "Sheltered by Ghosts": 1
+    },
+    "out": {
+      "Magda, the Hoardmaster": 1,
+      "Twinmaw Stormbrood": 1,
+      "Voice of Victory": 2
+    }
   }
 }
