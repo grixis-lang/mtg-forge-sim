@@ -1,0 +1,30 @@
+{
+  "control": {
+    "_why": "Duress vs counters/removal, plus threats that stick (hexproof Leatherhead, a planeswalker). Cuts small removal and the slow Saga.",
+    "in": {
+      "Duress": 4,
+      "Leatherhead, Swamp Stalker": 1,
+      "Professor Dellian Fel": 1
+    },
+    "out": {
+      "Requiting Hex": 1,
+      "Torch the Tower": 1,
+      "Molten Collapse": 1,
+      "Wolverine, Fierce Fighter": 1,
+      "The Misty Mountains Cold": 2
+    }
+  },
+  "midrange": {
+    "_why": "More creature removal (Strategic Betrayal also exiles the graveyard) and a planeswalker; cuts the slow Saga and some Pursuits.",
+    "in": {
+      "Bitter Triumph": 2,
+      "Strategic Betrayal": 2,
+      "Professor Dellian Fel": 1
+    },
+    "out": {
+      "The Misty Mountains Cold": 2,
+      "Wolverine, Fierce Fighter": 1,
+      "Obsessive Pursuit": 2
+    }
+  }
+}
