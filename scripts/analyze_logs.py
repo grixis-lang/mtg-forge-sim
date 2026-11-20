@@ -507,6 +507,23 @@ def opening_hand_report(games: list[dict]) -> list[str]:
         lack = [g for g in with_hand if card not in g["opening"]]
         out.append(f"| {card} | {n} | {pct(sum(score(g) for g in have), len(have))} | "
                    f"{pct(sum(score(g) for g in lack), len(lack))} |")
+    # 6c. by PAIR of non-land cards kept together (what a good starting hand looks like).
+    #     Only pairs seen in enough games to mean something; best win rate first.
+    min_games = 12
+    pair_games = defaultdict(list)
+    for g in with_hand:
+        spells = sorted(set(c for c in g["opening"] if c not in land_names))
+        for i in range(len(spells)):
+            for j in range(i + 1, len(spells)):
+                pair_games[(spells[i], spells[j])].append(g)
+    pairs = [(p, gs) for p, gs in pair_games.items() if len(gs) >= min_games]
+    if pairs:
+        pairs.sort(key=lambda x: (-sum(score(g) for g in x[1]) / len(x[1]), -len(x[1])))
+        out += ["", f"| Card pair in opening hand (seen in {min_games}+ games) | Games | Wins | Win % |",
+                "|---|---:|---:|---:|"]
+        for (a, b), gs in pairs[:15]:
+            wins = sum(score(g) for g in gs)
+            out.append(f"| {a} + {b} | {len(gs)} | {wins:g} | {pct(wins, len(gs))} |")
     return out
 
 
