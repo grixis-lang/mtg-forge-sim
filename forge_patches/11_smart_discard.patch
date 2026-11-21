@@ -1,5 +1,5 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
-index d1ef4a6..12a27ef 100644
+index 11e518b0..8d054bbc 100644
 --- a/forge-ai/src/main/java/forge/ai/AiProps.java
 +++ b/forge-ai/src/main/java/forge/ai/AiProps.java
 @@ -98,6 +98,9 @@ public enum AiProps {
@@ -13,12 +13,12 @@ index d1ef4a6..12a27ef 100644
      STRIPMINE_MIN_LANDS_FOR_NO_TIMING_CHECK ("3"),
      STRIPMINE_MIN_LANDS_OTB_FOR_NO_TEMPO_CHECK ("6"),
 diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
-index e69258f..57ca651 100644
+index 123a8684..e6993d92 100644
 --- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
 +++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
-@@ -763,6 +763,13 @@ public class PlayerControllerAi extends PlayerController {
+@@ -779,6 +779,13 @@ public class PlayerControllerAi extends PlayerController {
      @Override
-     public CardCollection chooseCardsToDiscardFrom(Player p, SpellAbility sa, CardCollection validCards, int min, int max, CardCollectionView visibleToChooser) {
+     public CardCollection chooseCardsToDiscardFrom(Player p, SpellAbility sa, CardCollection validCards, int min, int max, DelayedReveal delayedReveal) {
          if (p == player) {
 +            // SMART_DISCARD: discard the least useful cards for the current board
 +            if (SmartDiscard.isEnabled(player)) {
@@ -32,7 +32,7 @@ index e69258f..57ca651 100644
  
 diff --git a/forge-ai/src/main/java/forge/ai/SmartDiscard.java b/forge-ai/src/main/java/forge/ai/SmartDiscard.java
 new file mode 100644
-index 0000000..2003784
+index 00000000..2003784d
 --- /dev/null
 +++ b/forge-ai/src/main/java/forge/ai/SmartDiscard.java
 @@ -0,0 +1,169 @@

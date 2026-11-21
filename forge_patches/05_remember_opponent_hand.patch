@@ -1,8 +1,8 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
-index da00b11..7661ba8 100644
+index 4c8d4966..255035b0 100644
 --- a/forge-ai/src/main/java/forge/ai/AiController.java
 +++ b/forge-ai/src/main/java/forge/ai/AiController.java
-@@ -190,6 +190,13 @@ public class AiController {
+@@ -200,6 +200,13 @@ public class AiController {
          return memory;
      }
  
@@ -17,7 +17,7 @@ index da00b11..7661ba8 100644
  
      /** Whether Flat Monte Carlo is switched on for this player. */
 diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
-index ddd0f26..bd7af75 100644
+index aa17b720..b4832bea 100644
 --- a/forge-ai/src/main/java/forge/ai/AiProps.java
 +++ b/forge-ai/src/main/java/forge/ai/AiProps.java
 @@ -165,6 +165,9 @@ public enum AiProps {
@@ -31,7 +31,7 @@ index ddd0f26..bd7af75 100644
      // EXTRA_ROUNDS to 0 reproduces the original flat Monte Carlo, which is what the A/B benchmark uses as baseline.
      FLAT_MC_EXTRA_ROUNDS("2"),
 diff --git a/forge-ai/src/main/java/forge/ai/HandDisruption.java b/forge-ai/src/main/java/forge/ai/HandDisruption.java
-index 0d3abe1..92096cd 100644
+index 54188eed..10b9ac5e 100644
 --- a/forge-ai/src/main/java/forge/ai/HandDisruption.java
 +++ b/forge-ai/src/main/java/forge/ai/HandDisruption.java
 @@ -90,7 +90,7 @@ public final class HandDisruption {
@@ -45,7 +45,7 @@ index 0d3abe1..92096cd 100644
              }
 diff --git a/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java b/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java
 new file mode 100644
-index 0000000..b209582
+index 00000000..5ce3c023
 --- /dev/null
 +++ b/forge-ai/src/main/java/forge/ai/OpponentHandMemory.java
 @@ -0,0 +1,199 @@
@@ -249,10 +249,10 @@ index 0000000..b209582
 +    }
 +}
 diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
-index da17732..e69258f 100644
+index d26bce86..aeb59d46 100644
 --- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
 +++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
-@@ -578,12 +578,21 @@ public class PlayerControllerAi extends PlayerController {
+@@ -594,12 +594,21 @@ public class PlayerControllerAi extends PlayerController {
          for (Card c : cards) {
              AiCardMemory.rememberCard(player, c, AiCardMemory.MemorySet.REVEALED_CARDS);
          }
@@ -275,14 +275,14 @@ index da17732..e69258f 100644
          }
      }
  
-@@ -759,6 +768,18 @@ public class PlayerControllerAi extends PlayerController {
+@@ -779,6 +788,18 @@ public class PlayerControllerAi extends PlayerController {
  
          boolean isTargetFriendly = !p.isOpponentOf(player);
  
 +        // REMEMBER_OPPONENT_HAND: remember the revealed hand, and take the card our own hand can't answer
 +        final OpponentHandMemory mem = OpponentHandMemory.of(player);
 +        if (mem != null && !isTargetFriendly) {
-+            mem.note(player, visibleToChooser);
++            mem.note(player, validCards);   // the cards we can see and choose from (Forge records the full reveal itself)
 +            if (min == 1 && max == 1 && !validCards.isEmpty()) {
 +                final Card pick = OpponentHandMemory.bestToTake(player, validCards);
 +                if (pick != null) {
@@ -294,7 +294,7 @@ index da17732..e69258f 100644
          return isTargetFriendly
                 ? ComputerUtil.getCardsToDiscardFromFriend(player, p, sa, validCards, min, max)
                 : ComputerUtil.getCardsToDiscardFromOpponent(player, p, sa, validCards, min, max);
-@@ -1828,6 +1849,16 @@ public class PlayerControllerAi extends PlayerController {
+@@ -2002,6 +2023,16 @@ public class PlayerControllerAi extends PlayerController {
          if (delayedReveal != null) {
              reveal(delayedReveal);
          }
@@ -312,7 +312,7 @@ index da17732..e69258f 100644
      }
  
 diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-index aeb8d8a..008f58f 100644
+index b5fef498..102ba3c4 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 @@ -285,6 +285,11 @@ public class ChangeZoneAi extends SpellAbilityAi {
@@ -328,7 +328,7 @@ index aeb8d8a..008f58f 100644
              if (!source.ignoreLegendRule() && ai.isCardInPlay(source.getName())) {
                  return new AiAbilityDecision(0, AiPlayDecision.WouldDestroyLegend);
 diff --git a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
-index 030403b..9b3d18b 100644
+index f861c2bd..8079757f 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 @@ -44,6 +44,11 @@ public class DiscardAi extends SpellAbilityAi {
@@ -344,7 +344,7 @@ index 030403b..9b3d18b 100644
  
          if (sa.usesTargeting()) {
 diff --git a/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java b/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
-index 2f35648..0e5a6dd 100644
+index 2f356488..0e5a6dd3 100644
 --- a/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
 +++ b/forge-ai/src/main/java/forge/ai/simulation/HiddenInfoShuffler.java
 @@ -53,8 +53,8 @@ public final class HiddenInfoShuffler {
