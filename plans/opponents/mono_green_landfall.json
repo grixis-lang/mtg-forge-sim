@@ -1,0 +1,40 @@
+{
+  "control": {
+    "_why": "Vs control (wipes, counters, removal, flyers): threats that are hard to answer - uncounterable Surrak draws when targeted, Sandman comes back from the graveyard, Mole Man/Sapling make tokens from lands. Warg Tactics / Pick Your Poison kill flyers and enchantments. Cuts small creatures that die to wipes.",
+    "in": {
+      "Surrak, Elusive Hunter": 2,
+      "Sandman, Shifting Scoundrel": 2,
+      "Warg Tactics": 2,
+      "Pick Your Poison": 1
+    },
+    "out": {
+      "Keen-Eyed Curator": 2,
+      "Carnivorous Cultivator": 2,
+      "Llanowar Elves": 2,
+      "Sazh's Chocobo": 1
+    }
+  },
+  "midrange": {
+    "_why": "Vs creature midrange: more removal (Hard-Hitting Question) and Warg Tactics (kill a flyer or protect a threat). Cuts the weakest small creatures.",
+    "in": {
+      "Hard-Hitting Question": 3,
+      "Warg Tactics": 2
+    },
+    "out": {
+      "Keen-Eyed Curator": 2,
+      "Sazh's Chocobo": 2,
+      "Llanowar Elves": 1
+    }
+  },
+  "aggro": {
+    "_why": "Vs aggro: more removal to win the early fight, plus a 4th Harmonizer.",
+    "in": {
+      "Hard-Hitting Question": 3,
+      "Mightform Harmonizer": 1
+    },
+    "out": {
+      "Keen-Eyed Curator": 2,
+      "Sazh's Chocobo": 2
+    }
+  }
+}
