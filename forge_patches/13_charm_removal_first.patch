@@ -1,0 +1,50 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
+index 6b36e381..3b9bc643 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
+@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
+ import forge.ai.*;
+ import forge.game.GameActionUtil;
+ import forge.game.ability.AbilityUtils;
++import forge.game.ability.ApiType;
+ import forge.game.ability.effects.CharmEffect;
+ import forge.game.card.Card;
+ import forge.game.keyword.Keyword;
+@@ -116,6 +117,14 @@ public class CharmAi extends SpellAbilityAi {
+         }
+         int pawprintAmount = 0;
+ 
++        // Sim fix (patch 13): try removal modes (destroy / exile / bounce / damage a target) before
++        // "bonus" modes like counters or pumps. Forge shuffles the modes and takes the first playable one,
++        // so a charm with a good removal target often added +1/+1 counters instead. Stable sort keeps
++        // the random order inside each group.
++        if (pawprintLimit <= 0) {
++            choices.sort(java.util.Comparator.comparingInt(sub -> isRemovalMode(sub) ? 0 : 1));
++        }
++
+         // First pass using standard canPlayAi() for good choices
+         for (AbilitySub sub : choices) {
+             handleDependentModes(sa, chosen, sub);
+@@ -185,6 +194,22 @@ public class CharmAi extends SpellAbilityAi {
+         return chosen;
+     }
+ 
++    // Patch 13: is this charm mode a removal effect aimed at a target on the battlefield?
++    private static boolean isRemovalMode(AbilitySub sub) {
++        ApiType api = sub.getApi();
++        if (api == null || !sub.usesTargeting()) {
++            return false;
++        }
++        if (api == ApiType.Destroy || api == ApiType.DealDamage) {
++            return true;
++        }
++        if (api == ApiType.ChangeZone && "Battlefield".equals(sub.getParam("Origin"))) {
++            String dest = sub.getParam("Destination");
++            return "Exile".equals(dest) || "Graveyard".equals(dest) || "Hand".equals(dest) || "Library".equals(dest);
++        }
++        return false;
++    }
++
+     private List<AbilitySub> chooseTriskaidekaphobia(List<AbilitySub> choices, final Player ai) {
+         List<AbilitySub> chosenList = Lists.newArrayList();
+         if (choices == null || choices.isEmpty()) { return chosenList; }

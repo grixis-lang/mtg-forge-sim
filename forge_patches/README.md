@@ -18,6 +18,7 @@ the cache key includes a hash of these files.
 | `10_blight_only_when_spent.patch` | New AI profile setting `BLIGHT_ONLY_WHEN_SPENT` (off by default). Optional blight costs (Requiting Hex): only pay when a creature of ours has already done its job - it is blocking a non-trampler and would die in combat anyway (or is a token) - and put the -1/-1 counter on that creature. Otherwise cast without the blight. |
 | `11_smart_discard.patch` | New AI profile setting `SMART_DISCARD` (off by default). When an effect makes us discard from our own hand (Seasoned Cryomancer): keep the lands we still need (we want lands = most expensive spell in hand, 4-6), pitch extra lands first, then spells we can't cast soon and second copies of legends already in play; keep threats and answers; prefer nonland cards when that stuns attackers. |
 | `12_sweep_when_free.patch` | One-shot damage sweepers (Pyroclasm, Slagstorm, Fire Magic...): cast them when they kill 2+ of the opponent's creatures and none of ours. Forge's default needed ~2 creatures' worth of value even when we lose nothing, so it held Pyroclasm until turn 5-6, when the creatures were too big. Applies to both players. |
+| `13_charm_removal_first.patch` | Charms (choose-one spells): try removal modes (destroy / exile / bounce / targeted damage) before bonus modes. Forge shuffled the modes and took the first playable one, so Archenemy's Charm added +1/+1 counters instead of exiling a threat. Applies to both players (Boros Charm, Prismari Charm, Witherbloom Charm too). |
 
 ## If a patch stops applying
 
