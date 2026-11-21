@@ -1,8 +1,8 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
-index fdafae0..8c08a3b 100644
+index 21f3630e..b0ce7f30 100644
 --- a/forge-ai/src/main/java/forge/ai/AiController.java
 +++ b/forge-ai/src/main/java/forge/ai/AiController.java
-@@ -2188,6 +2188,16 @@ public class AiController {
+@@ -2321,6 +2321,16 @@ public class AiController {
              }
          }
  
@@ -20,7 +20,7 @@ index fdafae0..8c08a3b 100644
          lastFlatMcResult = null;
          if (reactiveMode != null) {
 diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
-index 6ede1a9..aa17b72 100644
+index 6ede1a98..aa17b720 100644
 --- a/forge-ai/src/main/java/forge/ai/AiProps.java
 +++ b/forge-ai/src/main/java/forge/ai/AiProps.java
 @@ -162,6 +162,9 @@ public enum AiProps {
@@ -35,7 +35,7 @@ index 6ede1a9..aa17b72 100644
      FLAT_MC_EXTRA_ROUNDS("2"),
 diff --git a/forge-ai/src/main/java/forge/ai/HandDisruption.java b/forge-ai/src/main/java/forge/ai/HandDisruption.java
 new file mode 100644
-index 0000000..54188ee
+index 00000000..54188eed
 --- /dev/null
 +++ b/forge-ai/src/main/java/forge/ai/HandDisruption.java
 @@ -0,0 +1,119 @@
@@ -159,7 +159,7 @@ index 0000000..54188ee
 +    }
 +}
 diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-index 386fb09..6f7f681 100644
+index 637db647..b5fef498 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 @@ -414,8 +414,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
@@ -175,7 +175,7 @@ index 386fb09..6f7f681 100644
                  return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
              }
 diff --git a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
-index f1b7086..030403b 100644
+index 2dd93294..f861c2bd 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/DiscardAi.java
 @@ -116,7 +116,8 @@ public class DiscardAi extends SpellAbilityAi {
@@ -189,18 +189,10 @@ index f1b7086..030403b 100644
          }
  
 diff --git a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-index 4f7264d..a2149f0 100644
+index 61ca7591..0c310e0c 100644
 --- a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
 +++ b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-@@ -6,6 +6,7 @@ import forge.ai.AiProps;
- import forge.ai.ComputerUtil;
- import forge.ai.ComputerUtilCombat;
- import forge.ai.ComputerUtilMana;
-+import forge.ai.HandDisruption;
- import forge.ai.PlayerControllerAi;
- import forge.ai.simulation.GameStateEvaluator.Score;
- import forge.game.Game;
-@@ -1623,6 +1624,10 @@ public final class FlatMonteCarloPicker {
+@@ -1644,6 +1644,10 @@ public final class FlatMonteCarloPicker {
              return false;
          }
          final int mana = ComputerUtilMana.getAvailableManaEstimate(player, true);
