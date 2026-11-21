@@ -1,0 +1,16 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ability/DamageAllAi.java b/forge-ai/src/main/java/forge/ai/ability/DamageAllAi.java
+index d44f0de5..1e7dcdf9 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/DamageAllAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/DamageAllAi.java
+@@ -167,6 +167,11 @@ public class  DamageAllAi extends SpellAbilityAi {
+         } else if (sa.getSubAbility() != null && ai.getGame().getPhaseHandler().is(PhaseType.MAIN1) && computerList.isEmpty()
+                 && opp.getCreaturesInPlay().size() > 1 && !ai.getCreaturesInPlay().isEmpty()) {
+             minGain = 126; // prepare for attack
++        } else if (computerList.isEmpty() && humanList.size() >= 2) {
++            // Sim fix (patch 12): a one-shot sweeper that kills two or more of their creatures and none of ours
++            // is always worth it. The default 200 made the AI hold Pyroclasm-style spells until the
++            // opponent's creatures had grown too big to die (cast on turn 5-6 instead of 2-3).
++            minGain = 0;
+         }
+ 
+         return ComputerUtilCard.evaluateCreatureList(humanList) - ComputerUtilCard.evaluateCreatureList(computerList)
