@@ -1,0 +1,15 @@
+diff --git a/forge-game/src/main/java/forge/game/event/GameEventSpellAbilityCast.java b/forge-game/src/main/java/forge/game/event/GameEventSpellAbilityCast.java
+index 1587d4dd..15444762 100644
+--- a/forge-game/src/main/java/forge/game/event/GameEventSpellAbilityCast.java
++++ b/forge-game/src/main/java/forge/game/event/GameEventSpellAbilityCast.java
+@@ -13,7 +13,9 @@ public record GameEventSpellAbilityCast(SpellAbilityView sa, StackItemView si, i
+     }
+ 
+     private static String computeTargetDescription(SpellAbility sa) {
+-        if (sa.getTargetRestrictions() == null) return null;
++        // Sim fix (patch 15, log only): modal spells (charms) keep their targets on the chosen mode,
++        // not on the spell itself, so they were logged with no targets. Look at the whole ability chain.
++        if (sa.getTargetRestrictions() == null && sa.getAllTargetChoices().isEmpty()) return null;
+         StringBuilder sb = new StringBuilder();
+         for (TargetChoices ch : sa.getAllTargetChoices()) {
+             if (ch != null) { if (sb.length() > 0) sb.append(" "); sb.append(ch); }
