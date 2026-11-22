@@ -1,8 +1,8 @@
 diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-index 637db647..2bc72e81 100644
+index 102ba3c4..f85b3942 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-@@ -922,6 +922,16 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -929,6 +929,16 @@ public class ChangeZoneAi extends SpellAbilityAi {
       *            a boolean.
       * @return a boolean.
       */
@@ -19,7 +19,7 @@ index 637db647..2bc72e81 100644
      private static boolean isPreferredTarget(final Player ai, final SpellAbility sa, final boolean mandatory, boolean immediately) {
          final Card source = sa.getHostCard();
          final List<ZoneType> origin = Lists.newArrayList();
-@@ -956,6 +966,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -963,6 +973,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
          CardCollection list = CardLists.getTargetableCards(game.getCardsIn(origin), sa);
  
          list = ComputerUtil.filterAITgts(sa, ai, list, true);
@@ -27,7 +27,7 @@ index 637db647..2bc72e81 100644
  
          if (source.isInZone(ZoneType.Hand)) {
              list = CardLists.filter(list, CardPredicates.nameNotEquals(source.getName())); // Don't get the same card back.
-@@ -986,6 +997,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -993,6 +1004,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
          }
  
          if (list.size() < sa.getMinTargets()) {
@@ -35,7 +35,7 @@ index 637db647..2bc72e81 100644
              return false;
          }
  
-@@ -1162,6 +1174,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -1169,6 +1181,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
              if (!immediately && game.getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
                      && game.getPhaseHandler().isPlayerTurn(ai)
                      && ai.getCreaturesInPlay().isEmpty()) {
@@ -43,7 +43,7 @@ index 637db647..2bc72e81 100644
                  return false;
              }
  
-@@ -1211,6 +1224,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -1218,6 +1231,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
                  && sa.getPayCosts().hasSpecificCostType(CostPutCounter.class);
  
          if (list.isEmpty() && !doWithoutTarget) {
@@ -51,7 +51,7 @@ index 637db647..2bc72e81 100644
              return false;
          }
  
-@@ -1256,6 +1270,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -1263,6 +1277,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
                      //option to hold removal instead only applies for single targeted removal
                      if (!immediately && sa.getMaxTargets() == 1
                              && !ComputerUtilCard.useRemovalNow(sa, choice, 0, destination)) {
@@ -59,7 +59,7 @@ index 637db647..2bc72e81 100644
                          return false;
                      }
  
-@@ -1320,6 +1335,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -1327,6 +1342,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
              }
          }
  
@@ -68,18 +68,10 @@ index 637db647..2bc72e81 100644
      }
  
 diff --git a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
-index 6b36e381..0390b1ad 100644
+index 6b36e381..72d5d2d0 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
-@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
- import forge.ai.*;
- import forge.game.GameActionUtil;
- import forge.game.ability.AbilityUtils;
-+import forge.game.ability.ApiType;
- import forge.game.ability.effects.CharmEffect;
- import forge.game.card.Card;
- import forge.game.keyword.Keyword;
-@@ -121,7 +122,12 @@ public class CharmAi extends SpellAbilityAi {
+@@ -121,7 +121,12 @@ public class CharmAi extends SpellAbilityAi {
              handleDependentModes(sa, chosen, sub);
              sub.setActivatingPlayer(ai);
              // TODO instead of shuffling check all to sort by AiAbilityDecision rating
