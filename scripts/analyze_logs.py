@@ -953,6 +953,15 @@ def main() -> None:
         sys.exit("No finished games found in the log.")
     opponent = log_path.stem
     text = report(games, ours, opponent, kinds, wipes, counters)
+    # Debug lines from temporary Forge debug patches ("AIDEBUG <message>"), counted by message.
+    # Only appears when a debug patch is active; used to see why the AI makes a choice.
+    debug = Counter()
+    for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if "AIDEBUG" in line:
+            debug[line.split("AIDEBUG", 1)[1].strip()] += 1
+    if debug:
+        text += "\n## AI debug lines (temporary debug patch)\n\n| Count | Message |\n|---:|---|\n"
+        text += "\n".join(f"| {n} | {msg} |" for msg, n in debug.most_common(60)) + "\n"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(text, encoding="utf-8")
     print(text)

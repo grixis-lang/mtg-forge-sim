@@ -1,0 +1,95 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+index 637db647..2bc72e81 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+@@ -922,6 +922,16 @@ public class ChangeZoneAi extends SpellAbilityAi {
+      *            a boolean.
+      * @return a boolean.
+      */
++    // TEMP DEBUG (patch 14): print why the AI does or doesn't pick a target for a charm's exile mode.
++    private static void dbgExile(final SpellAbility sa, final Player ai, final String why, final int n) {
++        if (sa instanceof AbilitySub && sa.getRootAbility().getApi() == ApiType.Charm
++                && "Battlefield".equals(sa.getParam("Origin")) && "Exile".equals(sa.getParam("Destination"))) {
++            System.out.println("AIDEBUG exile-target " + why + " list=" + n
++                    + " phase=" + ai.getGame().getPhaseHandler().getPhase()
++                    + " aiTurn=" + ai.getGame().getPhaseHandler().isPlayerTurn(ai));
++        }
++    }
++
+     private static boolean isPreferredTarget(final Player ai, final SpellAbility sa, final boolean mandatory, boolean immediately) {
+         final Card source = sa.getHostCard();
+         final List<ZoneType> origin = Lists.newArrayList();
+@@ -956,6 +966,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+         CardCollection list = CardLists.getTargetableCards(game.getCardsIn(origin), sa);
+ 
+         list = ComputerUtil.filterAITgts(sa, ai, list, true);
++        dbgExile(sa, ai, "start", list.size());
+ 
+         if (source.isInZone(ZoneType.Hand)) {
+             list = CardLists.filter(list, CardPredicates.nameNotEquals(source.getName())); // Don't get the same card back.
+@@ -986,6 +997,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+         }
+ 
+         if (list.size() < sa.getMinTargets()) {
++            dbgExile(sa, ai, "too-few-targets", list.size());
+             return false;
+         }
+ 
+@@ -1162,6 +1174,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+             if (!immediately && game.getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)
+                     && game.getPhaseHandler().isPlayerTurn(ai)
+                     && ai.getCreaturesInPlay().isEmpty()) {
++                dbgExile(sa, ai, "dont-rush-no-own-creatures", list.size());
+                 return false;
+             }
+ 
+@@ -1211,6 +1224,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+                 && sa.getPayCosts().hasSpecificCostType(CostPutCounter.class);
+ 
+         if (list.isEmpty() && !doWithoutTarget) {
++            dbgExile(sa, ai, "empty-after-filters", 0);
+             return false;
+         }
+ 
+@@ -1256,6 +1270,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+                     //option to hold removal instead only applies for single targeted removal
+                     if (!immediately && sa.getMaxTargets() == 1
+                             && !ComputerUtilCard.useRemovalNow(sa, choice, 0, destination)) {
++                        dbgExile(sa, ai, "held-useRemovalNow", list.size());
+                         return false;
+                     }
+ 
+@@ -1320,6 +1335,7 @@ public class ChangeZoneAi extends SpellAbilityAi {
+             }
+         }
+ 
++        dbgExile(sa, ai, "TARGET-CHOSEN", list.size());
+         return true;
+     }
+ 
+diff --git a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
+index 6b36e381..0390b1ad 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/CharmAi.java
+@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
+ import forge.ai.*;
+ import forge.game.GameActionUtil;
+ import forge.game.ability.AbilityUtils;
++import forge.game.ability.ApiType;
+ import forge.game.ability.effects.CharmEffect;
+ import forge.game.card.Card;
+ import forge.game.keyword.Keyword;
+@@ -121,7 +122,12 @@ public class CharmAi extends SpellAbilityAi {
+             handleDependentModes(sa, chosen, sub);
+             sub.setActivatingPlayer(ai);
+             // TODO instead of shuffling check all to sort by AiAbilityDecision rating
+-            if (SpellApiToAi.Converter.get(sub).canPlayWithSubs(ai, sub).willingToPlay() && canPayForAdditionalMode(sa, chosen, sub, ai)) {
++            AiAbilityDecision dbgDecision = SpellApiToAi.Converter.get(sub).canPlayWithSubs(ai, sub);
++            // TEMP DEBUG (patch 14): what does the AI think of each charm mode?
++            System.out.println("AIDEBUG charm-mode " + sub.getApi() + ":" + sub.getParamOrDefault("Origin", "-") + "->"
++                    + sub.getParamOrDefault("Destination", "-") + " decision=" + dbgDecision.decision()
++                    + " phase=" + ai.getGame().getPhaseHandler().getPhase() + " aiTurn=" + ai.getGame().getPhaseHandler().isPlayerTurn(ai));
++            if (dbgDecision.willingToPlay() && canPayForAdditionalMode(sa, chosen, sub, ai)) {
+                 if (pawprintLimit > 0) {
+                     int curPawprintAmount = AbilityUtils.calculateAmount(sub.getHostCard(), sub.getParamOrDefault("Pawprint", "0"), sub);
+                     if (pawprintAmount + curPawprintAmount > pawprintLimit) {
