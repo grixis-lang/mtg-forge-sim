@@ -1,0 +1,137 @@
+diff --git a/forge-game/src/main/java/forge/game/PositionLog.java b/forge-game/src/main/java/forge/game/PositionLog.java
+new file mode 100644
+index 0000000..4df34b8
+--- /dev/null
++++ b/forge-game/src/main/java/forge/game/PositionLog.java
+@@ -0,0 +1,118 @@
++package forge.game;
++
++import forge.game.card.Card;
++import forge.game.event.GameEventAddLog;
++import forge.game.keyword.Keyword;
++import forge.game.player.Player;
++import forge.game.zone.ZoneType;
++
++/**
++ * mtg-forge-sim: writes a snapshot of the board at the start of every turn, one log line per player.
++ * <p>
++ * These lines are the training data for our learned position evaluator (the "scorekeeper" of the
++ * new AI brain): each snapshot is later paired with who won that game, so a script can learn which
++ * board numbers really predict a win in our matchups.
++ * <p>
++ * LOG ONLY: nothing in this class changes how a game is played. It only reads the game state.
++ * <p>
++ * Example line, as it appears in the game log (one per player, every turn):
++ * <pre>
++ * Turn: Position turn=7 active=yes life=14 poison=0 hand=3 library=45 graveyard=6 exile=1 lands=4
++ *       creatures=2 power=5 toughness=6 evasive_power=3 tokens=1 walkers=0 loyalty=0 other_permanents=1
++ *       player=Ai(1)-our_deck
++ * </pre>
++ * The player's name is always last, because a name can contain spaces.
++ * Read by mtg-forge-sim's scripts/positions.py.
++ */
++public final class PositionLog {
++
++    /** Utility class: only static methods, never created. */
++    private PositionLog() {
++    }
++
++    /**
++     * Logs one snapshot line for every player still in the game.
++     * Called by PhaseHandler right after a new turn begins.
++     *
++     * @param game the game being played
++     */
++    public static void logTurnStart(final Game game) {
++        // 1. Which turn it is, and whose turn it is
++        final int turn = game.getPhaseHandler().getTurn();
++        final Player active = game.getPhaseHandler().getPlayerTurn();
++
++        // 2. One line per player, so both sides of the board are recorded every turn
++        for (final Player player : game.getPlayers()) {
++            final boolean isActive = player.equals(active);
++            game.fireEvent(new GameEventAddLog(GameLogEntryType.TURN, describe(turn, player, isActive)));
++        }
++    }
++
++    /**
++     * Builds the snapshot text for one player.
++     *
++     * @param turn     Forge's turn number (counts every player's turn)
++     * @param player   the player to describe
++     * @param isActive true if it is this player's turn
++     * @return the log message, e.g. "Position turn=7 active=yes life=14 ... player=Ai(1)-our_deck"
++     */
++    private static String describe(final int turn, final Player player, final boolean isActive) {
++        // --- Creatures: how many, how big, and how much of their power is hard to block ---
++        int creatures = 0;
++        int power = 0;
++        int toughness = 0;
++        int evasivePower = 0;
++        int tokens = 0;
++        for (final Card c : player.getCreaturesInPlay()) {
++            creatures++;
++            // Negative power (e.g. a -2/-2 shrunk creature) deals no damage, so count it as 0
++            final int p = Math.max(0, c.getNetPower());
++            power += p;
++            toughness += Math.max(0, c.getNetToughness());
++            if (c.hasKeyword(Keyword.FLYING) || c.hasKeyword(Keyword.MENACE) || c.hasKeyword(Keyword.TRAMPLE)) {
++                evasivePower += p;
++            }
++            if (c.isToken()) {
++                tokens++;
++            }
++        }
++
++        // --- Planeswalkers: how many, and their total loyalty ---
++        int walkers = 0;
++        int loyalty = 0;
++        for (final Card c : player.getPlaneswalkersInPlay()) {
++            walkers++;
++            loyalty += Math.max(0, c.getCurrentLoyalty());
++        }
++
++        // --- Other permanents: everything on the battlefield that isn't a land, creature or planeswalker
++        //     (artifacts, enchantments, battles...). Card draw engines like Phyrexian Arena land here. ---
++        int otherPermanents = 0;
++        for (final Card c : player.getCardsIn(ZoneType.Battlefield)) {
++            if (!c.isLand() && !c.isCreature() && !c.isPlaneswalker()) {
++                otherPermanents++;
++            }
++        }
++
++        // --- Put it all on one line as key=value pairs (easy to read for a script and for a person) ---
++        return "Position"
++                + " turn=" + turn
++                + " active=" + (isActive ? "yes" : "no")
++                + " life=" + player.getLife()
++                + " poison=" + player.getPoisonCounters()
++                + " hand=" + player.getZone(ZoneType.Hand).size()
++                + " library=" + player.getZone(ZoneType.Library).size()
++                + " graveyard=" + player.getZone(ZoneType.Graveyard).size()
++                + " exile=" + player.getZone(ZoneType.Exile).size()
++                + " lands=" + player.getLandsInPlay().size()
++                + " creatures=" + creatures
++                + " power=" + power
++                + " toughness=" + toughness
++                + " evasive_power=" + evasivePower
++                + " tokens=" + tokens
++                + " walkers=" + walkers
++                + " loyalty=" + loyalty
++                + " other_permanents=" + otherPermanents
++                + " player=" + player.getName();   // last: a name can contain spaces
++    }
++}
+diff --git a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+index 1920626..35e464b 100644
+--- a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
++++ b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
+@@ -205,6 +205,8 @@ public class PhaseHandler implements IHasForgeLog {
+                 extraPhases.clear();
+                 game.updateTurnForView();
+                 game.fireEvent(new GameEventTurnBegan(PlayerView.get(playerTurn), turn));
++                // mtg-forge-sim: log a snapshot of the board for the learned evaluator (log only, no change to play)
++                PositionLog.logTurnStart(game);
+ 
+                 for (final Player active : getActivePlayers()) {
+                     // Tokens starting game in play should suffer from Sum. Sickness

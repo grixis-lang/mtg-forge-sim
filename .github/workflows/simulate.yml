@@ -560,6 +560,33 @@ jobs:
               "results/raw/$opp.analytics.md" forge-build/forge-gui/res/cardsfolder > /dev/null
           done
 
+      - name: Save board snapshots for the new AI brain (analytics runs only)
+        # Training data for the learned scorekeeper (forge_patches/19_log_positions.patch +
+        # scripts/positions.py). Numbers only: no card names or deck names in these files.
+        # Each run gets its own file (run id in the name), so the data adds up over many runs.
+        if: inputs.analytics
+        env:
+          OURS: ${{ inputs.ours }}
+          SIDEBOARD: ${{ inputs.sideboard }}
+          BO3: ${{ inputs.bo3 }}
+          AI: ${{ inputs.ai }}
+          PRIORITIES: ${{ inputs.priorities }}
+          PROFILE: ${{ inputs.our_profile }}
+        run: |
+          mkdir -p results/positions
+          # Same name tags as the analytics reports, so the files are easy to match up
+          SBTAG=""; if [ "$BO3" = "true" ]; then SBTAG="_bo3"; elif [ "$SIDEBOARD" = "true" ]; then SBTAG="_sideboarded"; fi
+          PRIO=""; if [ "$PRIORITIES" = "true" ]; then PRIO="_prio"; fi
+          if [ -n "$PROFILE" ]; then PRIO="${PRIO}_${PROFILE}"; fi
+          for log in logs/*.log; do
+            [ -f "$log" ] || continue
+            case "$log" in *__s[0-9]*.log) continue ;; esac     # use each opponent's joined log, not the shard pieces
+            opp=$(basename "$log" .log)
+            # (the summary it prints is hidden: this repo's logs are public)
+            python3 scripts/positions.py "$log" "$OURS" \
+              "results/positions/${OURS}${SBTAG}_${AI}${PRIO}_vs_${opp}_run${GITHUB_RUN_ID}.csv" > /dev/null
+          done
+
       - name: Build the results table
         env:
           OURS: ${{ inputs.ours }}
