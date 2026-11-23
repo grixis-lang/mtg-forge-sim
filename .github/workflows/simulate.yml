@@ -617,14 +617,24 @@ jobs:
         run: |
           rm -rf results/raw
           FAM=$(cat "$RUNNER_TEMP/family.txt")
-          DEST="private/decks/$FAM/results"
-          mkdir -p "$DEST"
-          cp -r results/. "$DEST/"
+          DEST="decks/$FAM/results"
           cd private
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add decks/
-          git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, bo3=$BO3, ai=$AI, priorities=$PRIORITIES, $GAMES games)" || echo "No changes"
-          # another run may have pushed first; rebase and retry
-          # (several tests can finish at once, so retry up to 10 times with a random pause)
-          for i in $(seq 1 10); do git pull --rebase -q && git push -q && break; sleep $((RANDOM % 20 + 5)); done
+          # Several tests can finish at once and save the same files (e.g. two runs that both played one opponent).
+          # So each try starts from the private repo as it is NOW, copies our files on top (ours win) and pushes;
+          # a plain "pull --rebase" got stuck on such a conflict and lost the results without an error.
+          PUSHED=0
+          for i in $(seq 1 10); do
+            git fetch -q origin main
+            git reset -q --hard FETCH_HEAD
+            mkdir -p "$DEST"
+            cp -r "$GITHUB_WORKSPACE/results/." "$DEST/"
+            git add decks/
+            if ! git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, bo3=$BO3, ai=$AI, priorities=$PRIORITIES, $GAMES games)"; then
+              echo "No changes"; PUSHED=1; break
+            fi
+            if git push -q origin HEAD:main; then PUSHED=1; break; fi
+            sleep $((RANDOM % 20 + 5))
+          done
+          if [ "$PUSHED" != 1 ]; then echo "::error::Could not save the results to the private repo after 10 tries"; exit 1; fi
