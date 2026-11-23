@@ -1,0 +1,24 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+index 5ee53fdb..52e2dfb7 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
+@@ -1142,6 +1142,19 @@ public class ChangeZoneAi extends SpellAbilityAi {
+                         }
+                     }
+                 }
++                // Sim fix (patch 16): some bounces are meant for our OWN permanents (e.g. Nurturing Pixie
++                // returning a used-up Saga to replay it, or a creature with an enters trigger). A card script
++                // can list what the AI should return in AIBounceOwn$, best first, tiers separated by ";".
++                if (sa.hasParam("AIBounceOwn")) {
++                    final CardCollection mine = CardLists.filterControlledBy(list, ai);
++                    for (String tier : sa.getParam("AIBounceOwn").split(";")) {
++                        final CardCollection picks = CardLists.getValidCards(mine, tier.trim(), ai, source, sa);
++                        if (!picks.isEmpty()) {
++                            sa.getTargets().add(ComputerUtilCard.getBestAI(picks));
++                            return true;
++                        }
++                    }
++                }
+                 // bounce opponent's stuff
+                 list = CardLists.filterControlledBy(list, ai.getOpponents());
+                 if (!CardLists.getNotType(list, "Land").isEmpty()) {
