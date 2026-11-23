@@ -143,7 +143,18 @@ jobs:
       - name: Download Forge's latest source code
         id: forge
         run: |
-          git clone --depth 1 https://github.com/Card-Forge/forge forge
+          # forge_pin.txt (optional) holds a Forge commit id, so a batch of tests all use the
+          # same Forge version even if Forge changes while they run. Empty/missing = latest.
+          PIN=$(tr -d '[:space:]' < forge_pin.txt 2>/dev/null || true)
+          if [ -n "$PIN" ]; then
+            [[ "$PIN" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::forge_pin.txt must hold a full 40-character commit id"; exit 1; }
+            git init -q forge
+            git -C forge fetch -q --depth 1 https://github.com/Card-Forge/forge "$PIN"
+            git -C forge checkout -q FETCH_HEAD
+            echo "Forge pinned by forge_pin.txt"
+          else
+            git clone --depth 1 https://github.com/Card-Forge/forge forge
+          fi
           SHA=$(git -C forge rev-parse --short HEAD)
           echo "Forge version: $SHA"
           # Our AI fixes (forge_patches/*.patch) are part of the build, so a new or
@@ -259,7 +270,9 @@ jobs:
           python3 -c 'import json,sys; n=int(sys.argv[1]); assert 1<=n<=20, "shards must be 1-20"; print("shards="+json.dumps(list(range(1,n+1))))' "$SHARDS" >> "$GITHUB_OUTPUT"
           # Rule (user, 2026-11-11): while tuning, each test plays ONE chosen opponent.
           # "all" and comma lists are refused, so a test can't quietly run every matchup.
-          if [ -z "$OPPONENT" ] || [ "$OPPONENT" = "all" ] || [[ "$OPPONENT" == *,* ]]; then
+          # Exception (user, 2026-11-23): the meta round robin (decks named meta_rr_*) may list
+          # several opponents separated by commas.
+          if [ -z "$OPPONENT" ] || [ "$OPPONENT" = "all" ] || { [[ "$OPPONENT" == *,* ]] && [[ "$OURS" != meta_rr_* ]]; }; then
             echo "::error::Pick ONE opponent (a file name in decks/). Rule: one opponent per test while tuning."; exit 1
           fi
           if [ "$OPPONENT" != "all" ]; then
@@ -578,4 +591,5 @@ jobs:
           git add decks/
           git commit -q -m "Results: $OURS (sideboard=$SIDEBOARD, bo3=$BO3, ai=$AI, priorities=$PRIORITIES, $GAMES games)" || echo "No changes"
           # another run may have pushed first; rebase and retry
-          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+          # (several tests can finish at once, so retry up to 10 times with a random pause)
+          for i in $(seq 1 10); do git pull --rebase -q && git push -q && break; sleep $((RANDOM % 20 + 5)); done

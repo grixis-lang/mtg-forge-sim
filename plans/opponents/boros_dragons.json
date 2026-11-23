@@ -26,5 +26,18 @@
       "Twinmaw Stormbrood": 1,
       "Voice of Victory": 2
     }
+  },
+  "aggro": {
+    "_why": "Cheap answers to early threats (Seam Rip, Solitary Cell, Sheltered by Ghosts). Cuts the weakest creatures. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Seam Rip": 2,
+      "Solitary Cell": 1,
+      "Sheltered by Ghosts": 1
+    },
+    "out": {
+      "Magda, the Hoardmaster": 1,
+      "Twinmaw Stormbrood": 1,
+      "Voice of Victory": 2
+    }
   }
 }

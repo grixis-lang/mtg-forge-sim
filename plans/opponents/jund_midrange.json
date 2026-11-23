@@ -26,5 +26,16 @@
       "Wolverine, Fierce Fighter": 1,
       "Obsessive Pursuit": 2
     }
+  },
+  "aggro": {
+    "_why": "Fire Magic sweeps small creatures; Bitter Triumph kills anything. Cuts slow card-advantage cards. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Fire Magic": 2,
+      "Bitter Triumph": 2
+    },
+    "out": {
+      "The Misty Mountains Cold": 2,
+      "Obsessive Pursuit": 2
+    }
   }
 }

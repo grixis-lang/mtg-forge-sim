@@ -18,5 +18,16 @@
     "out": {
       "Skateboard": 2
     }
+  },
+  "aggro": {
+    "_why": "Seam Rip and Sheltered by Ghosts remove their early threats. Cuts Skateboard and the hexproof equipment (less needed vs creature decks). (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Seam Rip": 2,
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Skateboard": 2,
+      "Dragonfire Blade": 2
+    }
   }
 }

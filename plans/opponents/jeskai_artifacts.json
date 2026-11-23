@@ -24,5 +24,17 @@
       "Braided Net": 1,
       "Clay-Fired Bricks": 1
     }
+  },
+  "aggro": {
+    "_why": "More Authority of the Consuls and Day of Judgment to slow and reset creature decks. Cuts slow utility artifacts. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Authority of the Consuls": 2,
+      "Day of Judgment": 2
+    },
+    "out": {
+      "Braided Net": 1,
+      "Clay-Fired Bricks": 1,
+      "Boomerang Basics": 2
+    }
   }
 }

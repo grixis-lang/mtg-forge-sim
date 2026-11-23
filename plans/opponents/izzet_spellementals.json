@@ -22,5 +22,16 @@
       "Sleight of Hand": 2,
       "Opt": 2
     }
+  },
+  "aggro": {
+    "_why": "Fire Magic sweeps small creatures; extra Spell Snares hit their 2-drops. Cuts card filtering. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Fire Magic": 2,
+      "Spell Snare": 2
+    },
+    "out": {
+      "Sleight of Hand": 2,
+      "Opt": 2
+    }
   }
 }

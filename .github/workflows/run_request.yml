@@ -59,6 +59,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Parallel batches (meta round robin, user OK 2026-11-23) don't wait
+          if [ -f nowait.txt ]; then echo "Parallel batch: not waiting"; exit 0; fi
           for i in $(seq 1 320); do        # up to about 5 hours 20 minutes
             BUSY=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow simulate.yml --limit 20 \
                      --json status --jq '[.[] | select(.status != "completed")] | length')
@@ -72,8 +74,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          REF=$(head -n 1 dispatch.txt)
-          ARGS=()
-          while IFS= read -r line; do ARGS+=(-f "$line"); done < <(tail -n +2 dispatch.txt)
-          gh workflow run simulate.yml --repo "$GITHUB_REPOSITORY" --ref "$REF" "${ARGS[@]}"
-          echo "Test started on branch $REF."
+          # dispatch.txt holds one or more tests, separated by "---" lines;
+          # each test is its branch on the first line, then name=value lines
+          n=0
+          start() {
+            [ "${#LINES[@]}" -gt 0 ] || return 0
+            ARGS=()
+            for line in "${LINES[@]:1}"; do ARGS+=(-f "$line"); done
+            gh workflow run simulate.yml --repo "$GITHUB_REPOSITORY" --ref "${LINES[0]}" "${ARGS[@]}"
+            n=$((n + 1)); echo "Test $n started on branch ${LINES[0]}."
+            sleep 3
+          }
+          LINES=()
+          while IFS= read -r line; do
+            if [ "$line" = "---" ]; then start; LINES=(); else LINES+=("$line"); fi
+          done < dispatch.txt
+          start

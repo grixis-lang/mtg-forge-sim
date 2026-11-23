@@ -23,5 +23,18 @@
       "We Say Thee Nay!": 2,
       "Spell Snare": 1
     }
+  },
+  "aggro": {
+    "_why": "More cheap removal (Requiting Hex, Strategic Betrayal) and Vren as a sturdy blocker. Cuts counterspells. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Requiting Hex": 1,
+      "Strategic Betrayal": 2,
+      "Vren, the Relentless": 1
+    },
+    "out": {
+      "We Say Thee Nay!": 2,
+      "Spell Snare": 1,
+      "The Wondrous Wasp": 1
+    }
   }
 }

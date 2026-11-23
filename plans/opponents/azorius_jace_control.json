@@ -27,5 +27,17 @@
       "Mathemagics": 1,
       "Jace's Machinations": 1
     }
+  },
+  "aggro": {
+    "_why": "Flash fliers that block early and stop enter-the-battlefield value, plus a second sweeper. Cuts the slow Jace finishers and a draw spell. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Doorkeeper Thrull": 4,
+      "Ultima": 1
+    },
+    "out": {
+      "Mathemagics": 1,
+      "Jace's Machinations": 3,
+      "Consult the Star Charts": 1
+    }
   }
 }

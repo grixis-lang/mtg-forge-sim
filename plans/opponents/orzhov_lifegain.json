@@ -22,5 +22,16 @@
     "out": {
       "Aunt May": 2
     }
+  },
+  "aggro": {
+    "_why": "Seam Rip removes cheap threats; Deep-Cavern Bat is an extra lifelink flier. Cuts the slow cards. (added 2026-11-23 for the meta round robin)",
+    "in": {
+      "Seam Rip": 2,
+      "Deep-Cavern Bat": 1
+    },
+    "out": {
+      "Aunt May": 2,
+      "Liliana the Faultless": 1
+    }
   }
 }

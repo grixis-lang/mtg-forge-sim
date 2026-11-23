@@ -15,6 +15,9 @@ this script and starts the test.
            "opponent": "boros_dwarves", "ai": "Hardest", "priorities": true,
            "analytics": true, "our_profile": "EsperControl", "bo3": true,
            "sideboard": false, "shards": 8}
+          A BATCH starts several tests from one request (meta round robin, user OK
+          2026-11-23): {"batch": [<request>, <request>, ...], "parallel": true}
+          "parallel": true skips the one-test-at-a-time wait.
   Output: (1) "::add-mask::" lines, so GitHub hides our deck/profile names in the log
           (2) dispatch.txt: the branch on line 1, then one "name=value" per line
 
@@ -63,12 +66,16 @@ def build(request: dict) -> tuple[str, list[str]]:
     if not NAME.match(ours):
         fail("ours must be a simple deck name")
 
-    # Rule (user, 2026-11-11): ONE opponent per test while tuning
+    # Rule (user, 2026-11-11): ONE opponent per test while tuning.
+    # Exception (user, 2026-11-23): the meta round robin (decks named meta_rr_*) may
+    # list several opponents, separated by commas.
     opponent = str(request.get("opponent", ""))
-    if not NAME.match(opponent) or opponent == "all":
-        fail("Pick ONE opponent (a file name in decks/); 'all' and lists are not allowed")
-    if not Path(f"decks/{opponent}.txt").is_file():
-        fail("opponent is not a deck in decks/")
+    names = opponent.split(",") if ours.startswith("meta_rr_") else [opponent]
+    for one in names:
+        if not NAME.match(one) or one == "all":
+            fail("Pick ONE opponent (a file name in decks/); 'all' and lists are not allowed")
+        if not Path(f"decks/{one}.txt").is_file():
+            fail("opponent is not a deck in decks/")
 
     games = request.get("games", 100)
     if not isinstance(games, int) or not 1 <= games <= 500:
@@ -120,9 +127,25 @@ def main() -> None:
         fail("The request's settings file is not valid JSON")
     if not isinstance(request, dict):
         fail("The request's settings file must be a JSON object")
-    ref, settings = build(request)
-    out_file.write_text("\n".join([ref, *settings]) + "\n", encoding="utf-8")
-    print(f"Request checked: branch {ref}, {len(settings)} settings")
+    # A batch is a list of normal requests; each becomes its own test.
+    # In dispatch.txt the tests are separated by a line with "---".
+    batch = request.get("batch")
+    if batch is not None:
+        if not isinstance(batch, list) or not 1 <= len(batch) <= 20:
+            fail("batch must be a list of 1-20 requests")
+        if not all(isinstance(r, dict) for r in batch):
+            fail("every batch entry must be a JSON object")
+        if set(request) - {"batch", "parallel"}:
+            fail("a batch request may only contain 'batch' and 'parallel'")
+        tests = [build(r) for r in batch]
+    else:
+        tests = [build(request)]
+    blocks = ["\n".join([ref, *settings]) for ref, settings in tests]
+    out_file.write_text("\n---\n".join(blocks) + "\n", encoding="utf-8")
+    # Parallel batches skip the one-test-at-a-time wait (meta round robin only)
+    if batch is not None and request.get("parallel") is True:
+        Path("nowait.txt").write_text("parallel batch\n", encoding="utf-8")
+    print(f"Request checked: {len(tests)} test(s)")
 
 
 if __name__ == "__main__":
