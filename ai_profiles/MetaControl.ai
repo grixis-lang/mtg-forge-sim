@@ -369,6 +369,6 @@ SMART_DISCARD=true
 # Step 2a: kill real threats with removal right away instead of saving removal for a bigger target.
 REMOVAL_KILL_THREATS_EARLY=true
 # Step 2d: instant removal waits for the opponent's turn (attack or end step) unless our life is in danger.
-REMOVAL_INSTANT_ON_THEIR_TURN=false
+REMOVAL_INSTANT_ON_THEIR_TURN=true
 # Step 2c: save creature wipes for 2+ creatures / real pressure, not a lone creature spot removal can answer.
 WIPE_SAVE_FOR_SEVERAL=true
