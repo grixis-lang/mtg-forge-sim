@@ -362,6 +362,8 @@ jobs:
           PROFILE: ${{ inputs.our_profile }}
         run: |
           cp engine/ai_profiles/*.ai forge-build/forge-gui/res/ai/ 2>/dev/null || true
+          # Public profiles for meta decks (e.g. MetaControl for the control decks, see plans/opponent_ai.json)
+          cp ai_profiles/*.ai forge-build/forge-gui/res/ai/ 2>/dev/null || true
           # Stop early if the chosen profile doesn't exist (otherwise Forge would quietly use another one)
           if [ -n "$PROFILE" ] && [ ! -f "forge-build/forge-gui/res/ai/$PROFILE.ai" ]; then
             echo "The AI profile you chose is not in the private repo's engine/ai_profiles/"; exit 1
@@ -398,6 +400,12 @@ jobs:
           # Optional arguments, only added when used
           EXTRA=()
           if [ -n "$PROFILE" ]; then EXTRA+=(--our-ai "$PROFILE"); fi
+          # The opponent's own AI profile, if plans/opponent_ai.json names one (e.g. control decks)
+          THEIRS=$(python3 -c "import json,sys; print(json.load(open('plans/opponent_ai.json')).get(sys.argv[1], ''))" "$OPP" 2>/dev/null || true)
+          if [ -n "$THEIRS" ]; then
+            [ -f "forge-build/forge-gui/res/ai/$THEIRS.ai" ] || { echo "::error::plans/opponent_ai.json names a missing AI profile for $OPP"; exit 1; }
+            EXTRA+=(--their-ai "$THEIRS"); echo "Opponent $OPP plays with AI profile $THEIRS"
+          fi
           if [ "$ANALYTICS" = "true" ]; then EXTRA+=(--log-out "out/logs/$TAG.log"); fi
           if [ "$BO3" = "true" ]; then
             # Real matches: game 1 with both main decks, games 2-3 with both sideboarded decks.

@@ -66,6 +66,9 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--log-out", default=None,
                    help="save Forge's full game log here (turns off quiet mode) "
                         "for scripts/analyze_logs.py")
+    p.add_argument("--their-ai", default="",
+                   help="a different AI profile for the OPPONENT only (e.g. MetaControl for a control "
+                        "meta deck; see plans/opponent_ai.json); blank = the normal --ai level")
     p.add_argument("--our-ai", default="",
                    help="a different AI profile for OUR deck only (e.g. MyProfile, a file in "
                         "Forge's res/ai folder); the opponent keeps --ai")
@@ -113,15 +116,16 @@ def forge_command(args: argparse.Namespace, games: int, memory: str) -> list[str
                     f"{args.opponent_sb or args.opponent_deck or args.opponent}.dck"]
     if not args.log_out:
         command.append("-q")                     # quiet: results only, no full logs
-    if args.our_ai:
-        # player 1 (our deck) uses our own profile, player 2 keeps the normal level
-        command += ["-a", args.our_ai, args.ai or "Default"]
-    elif args.ai and args.ai != "Default":
-        command += ["-a", args.ai, args.ai]      # same AI level for both players
+    # Player 1 = our deck, player 2 = the opponent. Each uses its own profile if one is
+    # given (--our-ai / --their-ai), otherwise the normal AI level of the test.
+    p1 = args.our_ai or args.ai or "Default"
+    p2 = args.their_ai or args.ai or "Default"
+    if p1 != "Default" or p2 != "Default":
+        command += ["-a", p1, p2]
     # Forge turns its Monte Carlo search OFF in simulations unless asked:
     # "on" for Hard, "max" (desktop strength) for Hardest. Our own profiles are
     # built on Hardest, so they get "max" too.
-    if args.ai == "Hardest" or args.our_ai:
+    if args.ai == "Hardest" or args.our_ai or args.their_ai:
         command += ["-mc", "max"]
     elif args.ai == "Hard":
         command += ["-mc", "on"]
@@ -333,6 +337,7 @@ def main() -> None:
         "games_played": played,
         "ai": args.ai,
         "our_ai": args.our_ai or args.ai,
+        "their_ai": args.their_ai or args.ai,
         "replayed_games": replayed,      # games played again after a Forge crash
         "problems": problems,            # what went wrong, if anything
         "minutes": round((time.time() - start) / 60, 1),

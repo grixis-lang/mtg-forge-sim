@@ -1,0 +1,5 @@
+{
+  "_how_to_read": "AI profile each meta deck plays with (a file in ai_profiles/ or the private repo engine/ai_profiles/, without .ai). Decks not listed use the normal AI level of the test. Added 2026-11-23 so control decks play like control decks.",
+  "azorius_jace_control": "MetaControl",
+  "dimir_control": "MetaControl"
+}
