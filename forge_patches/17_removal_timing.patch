@@ -43,3 +43,36 @@ index 70e1cc5b..2c3192c8 100644
          //Check for cards that profit from spells - for example Prowess or Threshold
          if (phaseType == PhaseType.MAIN1 && ComputerUtil.castSpellInMain1(ai, sa)) {
              return true;
+diff --git a/forge-ai/src/main/java/forge/ai/simulation/ActivationGuard.java b/forge-ai/src/main/java/forge/ai/simulation/ActivationGuard.java
+index c2f0be40..1a33f95e 100644
+--- a/forge-ai/src/main/java/forge/ai/simulation/ActivationGuard.java
++++ b/forge-ai/src/main/java/forge/ai/simulation/ActivationGuard.java
+@@ -11,6 +11,9 @@ import java.util.Set;
+ 
+ import org.apache.commons.lang3.tuple.Pair;
+ 
++import forge.ai.AiProfileUtil;
++import forge.ai.AiProps;
++import forge.ai.ComputerUtil;
+ import forge.ai.ComputerUtilCard;
+ import forge.ai.BounceValue;
+ import forge.ai.ComputerUtilMana;
+@@ -522,10 +525,18 @@ public final class ActivationGuard {
+         if (candidates.isEmpty()) {
+             return false;
+         }
++        // Sim fix (patch 17): REMOVAL_KILL_THREATS_EARLY (control decks) - a creature that attacks for 2 or more, or any
++        // creature while our life is in danger, is worth the land or tokens the spell gives its controller. Against fast
++        // decks those early creatures are what beats a control deck (Get Lost and Erode used to wait for a big target).
++        final boolean killThreats = AiProfileUtil.getBoolProperty(ai, AiProps.REMOVAL_KILL_THREATS_EARLY);
++        final boolean inDanger = killThreats && ComputerUtil.aiLifeInDanger(ai, false, 0);
+         for (final Card c : candidates) {
+             if (!c.isCreature() || c.isLand()) {
+                 return false; // a planeswalker, an artifact, an enchantment: not judged here
+             }
++            if (killThreats && (inDanger || c.getNetPower() >= 2)) {
++                return false;
++            }
+             if (!isSmallBody(c) && ComputerUtilCard.evaluateCreature(c) >= gift) {
+                 return false; // something that is worth the gift
+             }
