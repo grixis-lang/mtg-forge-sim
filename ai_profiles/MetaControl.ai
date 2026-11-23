@@ -364,3 +364,11 @@ LIFE_OR_DISCARD_SMART=true
 AVOID_UNPAYABLE_WARD=true
 BLIGHT_ONLY_WHEN_SPENT=true
 SMART_DISCARD=true
+
+# Control fixes being tested one at a time (forge_patches 17 and 18), see the meta_control_ai study notes.
+# Step 2a: kill real threats with removal right away instead of saving removal for a bigger target.
+REMOVAL_KILL_THREATS_EARLY=false
+# Step 2d: instant removal waits for the opponent's turn (attack or end step) unless our life is in danger.
+REMOVAL_INSTANT_ON_THEIR_TURN=false
+# Step 2c: save creature wipes for 2+ creatures / real pressure, not a lone creature spot removal can answer.
+WIPE_SAVE_FOR_SEVERAL=false

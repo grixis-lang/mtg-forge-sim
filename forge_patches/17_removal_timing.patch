@@ -1,0 +1,45 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index 8d054bbc..312e4973 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -101,6 +101,12 @@ public enum AiProps {
+     // Discarding from our own hand (e.g. Seasoned Cryomancer): keep needed lands, pitch extra lands and spells
+     // we can't cast soon, keep threats/answers, prefer nonland when that stuns attackers. See SmartDiscard.
+     SMART_DISCARD ("false"),
++    // Sim fix (patch 17): control decks kill a real threat with removal as soon as they can, instead of
++    // rolling dice to save the removal for a bigger target.
++    REMOVAL_KILL_THREATS_EARLY ("false"),
++    // Sim fix (patch 17): with REMOVAL_KILL_THREATS_EARLY, instant removal waits for the opponent's turn
++    // (their attack or end step) unless our life is in danger.
++    REMOVAL_INSTANT_ON_THEIR_TURN ("false"),
+     STRIPMINE_MIN_LANDS_IN_HAND_TO_ACTIVATE ("1"),
+     STRIPMINE_MIN_LANDS_FOR_NO_TIMING_CHECK ("3"),
+     STRIPMINE_MIN_LANDS_OTB_FOR_NO_TEMPO_CHECK ("6"),
+diff --git a/forge-ai/src/main/java/forge/ai/ComputerUtilCard.java b/forge-ai/src/main/java/forge/ai/ComputerUtilCard.java
+index 70e1cc5b..2c3192c8 100644
+--- a/forge-ai/src/main/java/forge/ai/ComputerUtilCard.java
++++ b/forge-ai/src/main/java/forge/ai/ComputerUtilCard.java
+@@ -1347,6 +1347,23 @@ public class ComputerUtilCard {
+             return true;
+         }
+ 
++        // Sim fix (patch 17): REMOVAL_KILL_THREATS_EARLY (control decks) - answer a real threat (a creature that can hit
++        // us, or a strong one) as soon as we can, instead of a dice roll that often saves the removal for a bigger target:
++        // against fast decks the early creatures are what kill a control deck. With REMOVAL_INSTANT_ON_THEIR_TURN,
++        // instant removal waits for the opponent's turn (their attack or end step) unless our life is in danger, so our
++        // own turn stays free for other spells and counterspell mana. Otherwise Forge's normal timing below applies.
++        if (AiProfileUtil.getBoolProperty(ai, AiProps.REMOVAL_KILL_THREATS_EARLY) && c.isCreature()
++                && c.getController().isOpponentOf(ai) && (c.getNetPower() > 0 || evaluateCreature(c) >= 160)) {
++            if (!AiProfileUtil.getBoolProperty(ai, AiProps.REMOVAL_INSTANT_ON_THEIR_TURN)
++                    || SpellAbilityAi.isSorcerySpeed(sa, ai)) {
++                return true;
++            }
++            // instant removal: kill it when it attacks, at their end step, or now if our life is in danger;
++            // otherwise wait (we get another chance later this turn cycle)
++            return c.isAttacking() || (!ph.isPlayerTurn(ai) && phaseType == PhaseType.END_OF_TURN)
++                    || ComputerUtil.aiLifeInDanger(ai, false, 0);
++        }
++
+         //Check for cards that profit from spells - for example Prowess or Threshold
+         if (phaseType == PhaseType.MAIN1 && ComputerUtil.castSpellInMain1(ai, sa)) {
+             return true;

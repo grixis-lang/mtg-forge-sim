@@ -1,0 +1,84 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index 312e4973..bcf8e8d9 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -107,6 +107,9 @@ public enum AiProps {
+     // Sim fix (patch 17): with REMOVAL_KILL_THREATS_EARLY, instant removal waits for the opponent's turn
+     // (their attack or end step) unless our life is in danger.
+     REMOVAL_INSTANT_ON_THEIR_TURN ("false"),
++    // Sim fix (patch 18): don't spend a creature board wipe on one creature we could answer with a spot removal
++    // spell in hand; wipe 2+ creatures when their next attack would take a third of our life.
++    WIPE_SAVE_FOR_SEVERAL ("false"),
+     STRIPMINE_MIN_LANDS_IN_HAND_TO_ACTIVATE ("1"),
+     STRIPMINE_MIN_LANDS_FOR_NO_TIMING_CHECK ("3"),
+     STRIPMINE_MIN_LANDS_OTB_FOR_NO_TEMPO_CHECK ("6"),
+diff --git a/forge-ai/src/main/java/forge/ai/ability/DestroyAllAi.java b/forge-ai/src/main/java/forge/ai/ability/DestroyAllAi.java
+index 6dc9a8c7..96738e7b 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/DestroyAllAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/DestroyAllAi.java
+@@ -2,6 +2,7 @@ package forge.ai.ability;
+ 
+ import forge.ai.*;
+ import forge.card.MagicColor;
++import forge.game.ability.ApiType;
+ import forge.game.card.*;
+ import forge.game.combat.Combat;
+ import forge.game.cost.Cost;
+@@ -49,6 +50,29 @@ public class DestroyAllAi extends SpellAbilityAi {
+         return doMassRemovalLogic(ai, sa);
+     }
+ 
++    /** Sim fix (patch 18): true if a castable spot removal spell in our hand (destroy, exile/bounce, damage) can target this card. */
++    private static boolean holdsSpotRemovalFor(final Player ai, final Card target, final SpellAbility wipe) {
++        for (final Card card : ai.getCardsIn(ZoneType.Hand)) {
++            if (card.equals(wipe.getHostCard())) {
++                continue;
++            }
++            for (final SpellAbility spell : card.getSpells()) {
++                final ApiType api = spell.getApi();
++                if (api != ApiType.Destroy && api != ApiType.ChangeZone && api != ApiType.DealDamage) {
++                    continue;
++                }
++                if (!spell.usesTargeting()) {
++                    continue;
++                }
++                spell.setActivatingPlayer(ai);
++                if (spell.canTarget(target) && ComputerUtilMana.canPayManaCost(spell, ai, 0, false)) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++
+     public static AiAbilityDecision doMassRemovalLogic(Player ai, SpellAbility sa) {
+         final Card source = sa.getHostCard();
+         final String logic = sa.getParamOrDefault("AILogic", "");
+@@ -122,6 +146,27 @@ public class DestroyAllAi extends SpellAbilityAi {
+ 
+             // if only creatures are affected evaluate both lists and pass only if human creatures are more valuable
+             if (CardLists.getNotType(opplist, "Creature").isEmpty() && CardLists.getNotType(ailist, "Creature").isEmpty()) {
++                // Sim fix (patch 18): WIPE_SAVE_FOR_SEVERAL (control decks). A lone creature that a spot removal spell in
++                // hand can handle is not worth the wipe (unless our life is in danger); with 2+ of their creatures and real
++                // pressure (their next attack would take a third of our life or more) wipe even if the value gap is small.
++                if (AiProfileUtil.getBoolProperty(ai, AiProps.WIPE_SAVE_FOR_SEVERAL)) {
++                    final boolean inDanger = ComputerUtil.aiLifeInDanger(ai, false, 0);
++                    if (opplist.size() == 1 && !inDanger && holdsSpotRemovalFor(ai, opplist.getFirst(), sa)) {
++                        return new AiAbilityDecision(0, AiPlayDecision.CantPlayAi);
++                    }
++                    if (opplist.size() >= 2
++                            && ComputerUtilCard.evaluateCreatureList(ailist) < ComputerUtilCard.evaluateCreatureList(opplist)) {
++                        int power = 0;
++                        for (final Card att : opplist) {
++                            if (ComputerUtilCombat.canAttackNextTurn(att, ai)) {
++                                power += Math.max(0, att.getNetCombatDamage());
++                            }
++                        }
++                        if (power * 3 >= ai.getLife()) {
++                            return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
++                        }
++                    }
++                }
+                 if (ComputerUtilCard.evaluateCreatureList(ailist) + CREATURE_EVAL_THRESHOLD < ComputerUtilCard.evaluateCreatureList(opplist)) {
+                     return new AiAbilityDecision(100, AiPlayDecision.WillPlay);
+ 
