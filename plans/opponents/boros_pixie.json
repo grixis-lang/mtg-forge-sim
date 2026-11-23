@@ -1,0 +1,17 @@
+{
+  "control": {
+    "_why": "Few creatures to hit, so cut cheap creature removal. Clarion Conqueror is a flying threat that also shuts off planeswalker and artifact abilities; Sheltered by Ghosts exiles a planeswalker or key permanent.",
+    "in": {"Clarion Conqueror": 3, "Sheltered by Ghosts": 2},
+    "out": {"Erode": 1, "Torch the Tower": 2, "Guiding Hydra": 1, "Practiced Offense": 1}
+  },
+  "midrange": {
+    "_why": "Sunspine Lynx is a bigger body that stops lifegain; Sheltered by Ghosts answers a big threat. Cuts the slow and fragile cards.",
+    "in": {"Sunspine Lynx": 3, "Sheltered by Ghosts": 2},
+    "out": {"Springleaf Drum": 2, "Practiced Offense": 2, "Guiding Hydra": 1}
+  },
+  "aggro": {
+    "_why": "Authority of the Consuls slows their attackers and gains life; Seam Rip and Erode remove cheap threats. Cuts the slow cards.",
+    "in": {"Authority of the Consuls": 2, "Seam Rip": 2, "Erode": 1},
+    "out": {"Practiced Offense": 2, "Springleaf Drum": 2, "Guiding Hydra": 1}
+  }
+}

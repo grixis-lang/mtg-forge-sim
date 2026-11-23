@@ -22,5 +22,16 @@
   "Thorin, Mountain-king": 250,
   "Mightform Harmonizer": 250,
   "_jeskai_artifacts": "Construct tokens from Simulacrum Synthesizer grow with every artifact and won most of our late losses",
-  "token:c_0_0_a_construct_total_artifacts": 200
+  "token:c_0_0_a_construct_total_artifacts": 200,
+  "_boros_pixie": "Captain Kirk makes tokens/pumps each attack; Nova Hellkite and Starfield Shepherd are the flying threats (added 2026-11-23)",
+  "Captain James T. Kirk": 200,
+  "Nova Hellkite": 200,
+  "Starfield Shepherd": 150,
+  "_selesnya_landfall": "Same engines as Mono-Green (Mossborn Hydra, Icetill Explorer, Mightform Harmonizer are already listed)",
+  "_selesnya_michelangelo": "Ouroboroid puts counters on every creature each combat; Michelangelo adds an extra counter every time (added 2026-11-23)",
+  "Ouroboroid": 300,
+  "Michelangelo, Weirdness to 11": 250,
+  "_dimir_control": "Georgiou and Emeritus of Ideation are their only creature win conditions (added 2026-11-23)",
+  "Georgiou, Terran Emperor": 250,
+  "Emeritus of Ideation": 200
 }

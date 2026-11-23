@@ -1,0 +1,17 @@
+{
+  "control": {
+    "_why": "Board wipes and cheap creature removal have few targets. Brings in discard, an extra counter and more threats that win long games.",
+    "in": {"Duress": 2, "Annul": 1, "Emeritus of Ideation": 1, "Georgiou, Terran Emperor": 1, "Wan Shi Tong, Librarian": 1},
+    "out": {"Deadly Cover-Up": 4, "Requiting Hex": 2}
+  },
+  "midrange": {
+    "_why": "More spot removal, and Torpor Orb stops creatures' enter-the-battlefield value. Cuts the slow Jace combo card and a narrow counter.",
+    "in": {"Bitter Triumph": 1, "Torpor Orb": 2},
+    "out": {"Jace's Machinations": 2, "Spell Snare": 1}
+  },
+  "aggro": {
+    "_why": "More cheap answers for early threats. Cuts the slow Jace combo card.",
+    "in": {"Bitter Triumph": 1, "Spell Snare": 1},
+    "out": {"Jace's Machinations": 2}
+  }
+}
