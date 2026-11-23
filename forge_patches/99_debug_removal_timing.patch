@@ -1,0 +1,45 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index 7f031998..35a5ae80 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -90,6 +90,18 @@ import static java.lang.Math.max;
+ public class AiController {
+     private final Player player;
+     private final Game game;
++    // TEMPORARY debug (patch 99, log only): why control decks cast cheap removal late. Real games only (not rollouts).
++    private static final Set<String> DEBUG_REMOVAL = Set.of("Get Lost", "Erode", "Feed the Cycle", "Day of Judgment",
++            "Deadly Cover-Up", "Seam Rip");
++    private void debugRemoval(final SpellAbility sa, final String what) {
++        if (game.isSimulationCopy() || sa == null || sa.getHostCard() == null
++                || !DEBUG_REMOVAL.contains(sa.getHostCard().getName())) {
++            return;
++        }
++        final PhaseHandler dph = game.getPhaseHandler();
++        System.out.println("AIDEBUG " + sa.getHostCard().getName() + " | " + (dph.isPlayerTurn(player) ? "our " : "their ")
++                + dph.getPhase() + " | " + what);
++    }
+     private final AiCardMemory memory;
+     private Combat predictedCombat;
+     private Combat predictedCombatNextTurn;
+@@ -2848,6 +2860,13 @@ public class AiController {
+         final FlatMonteCarloPicker.Result result = FlatMonteCarloPicker.choose(player, approved, extras, cfg,
+                 sa -> playDecisionStable(sa) == AiPlayDecision.WillPlay && guardProblem(sa, null, saveCantrips) == null, mode);
+         lastFlatMcResult = result;
++        for (final SpellAbility dsa : approved) {
++            if (dsa.getHostCard() != null && DEBUG_REMOVAL.contains(dsa.getHostCard().getName())) {
++                debugRemoval(dsa, "picker -> " + (result.hold ? "hold mana" : result.choice == null ? "nothing"
++                        : result.choice == dsa ? "CAST IT" : "other: " + (result.choice.getHostCard() == null ? "?" : result.choice.getHostCard().getName())));
++                break;
++            }
++        }
+         FlatMonteCarloStats.record(result);
+         flatMcTurnSpentNanos += result.elapsedNanos;
+         noteFlatMcOutcome(result.reason);
+@@ -3356,6 +3375,7 @@ public class AiController {
+                     }
+                     // PhaseHandler ph = game.getPhaseHandler();
+                     // System.out.printf("Ai thinks '%s' of %s -> %s @ %s %s >>> \n", opinion, sa.getHostCard(), sa, Lang.getInstance().getPossesive(ph.getPlayerTurn().getName()), ph.getPhase());
++                    debugRemoval(sa, "opinion " + opinion);
+ 
+                     if (isFlatMcOnlyPlay(sa)) {
+                         // never approved by the heuristics: only a play for the rollouts to weigh, and only with discovery
