@@ -371,4 +371,4 @@ REMOVAL_KILL_THREATS_EARLY=true
 # Step 2d: instant removal waits for the opponent's turn (attack or end step) unless our life is in danger.
 REMOVAL_INSTANT_ON_THEIR_TURN=false
 # Step 2c: save creature wipes for 2+ creatures / real pressure, not a lone creature spot removal can answer.
-WIPE_SAVE_FOR_SEVERAL=false
+WIPE_SAVE_FOR_SEVERAL=true
