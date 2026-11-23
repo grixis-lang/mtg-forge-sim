@@ -1,0 +1,15 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ComputerUtil.java b/forge-ai/src/main/java/forge/ai/ComputerUtil.java
+index 88c5482b..23009499 100644
+--- a/forge-ai/src/main/java/forge/ai/ComputerUtil.java
++++ b/forge-ai/src/main/java/forge/ai/ComputerUtil.java
+@@ -1310,6 +1310,10 @@ public class ComputerUtil {
+ 
+         if (card.isCreature() && !cardState.hasKeyword(Keyword.DEFENDER)
+                 && (cardState.hasKeyword(Keyword.HASTE) || hasACardGivingHaste(ai, true) || sa.isDash())) {
++            // TEMPORARY debug (patch 99): log when the AI casts before combat because of a haste-giving effect
++            if (!cardState.hasKeyword(Keyword.HASTE) && !sa.isDash()) {
++                System.out.println("AIDEBUG main1 for haste effect: " + card.getName());
++            }
+             return true;
+         }
+ 
