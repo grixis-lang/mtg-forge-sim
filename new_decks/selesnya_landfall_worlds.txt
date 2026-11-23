@@ -1,0 +1,26 @@
+4 Llanowar Elves
+4 Sazh's Chocobo
+3 Esper Origins
+3 Doorkeeper Thrull
+2 Carnivorous Cultivator
+3 Mightform Harmonizer
+4 Icetill Explorer
+4 Mossborn Hydra
+2 Erode
+4 Earthbender Ascension
+10 Forest
+2 Plains
+4 Temple Garden
+3 Ba Sing Se
+2 Escape Tunnel
+4 Fabled Passage
+2 Elven Passage
+
+Sideboard
+3 Surrak, Elusive Hunter
+2 Sheltered by Ghosts
+1 Seam Rip
+1 Doorkeeper Thrull
+4 Clarion Conqueror
+1 Erode
+3 Sapling Nursery
