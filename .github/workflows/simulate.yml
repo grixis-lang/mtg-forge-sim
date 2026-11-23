@@ -327,7 +327,34 @@ jobs:
       - name: Get our scripts
         uses: actions/checkout@v4
 
+      # When several runs start at once with a new Forge version (parallel batches), they all build it, but only
+      # one of them can save the cached build, and it may still be uploading when another run's games start.
+      # So a missed cache is tried again after a wait (3 tries, about 4 minutes) before the job gives up.
       - name: Get the Forge build
+        id: forge1
+        uses: actions/cache/restore@v4
+        with:
+          path: forge-build
+          key: ${{ needs.build.outputs.cache-key }}
+
+      - name: Wait for the Forge build to finish saving (only if it was not there yet)
+        if: steps.forge1.outputs.cache-hit != 'true'
+        run: sleep 90
+
+      - name: Get the Forge build (second try)
+        id: forge2
+        if: steps.forge1.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: forge-build
+          key: ${{ needs.build.outputs.cache-key }}
+
+      - name: Wait a bit longer (only if it is still not there)
+        if: steps.forge1.outputs.cache-hit != 'true' && steps.forge2.outputs.cache-hit != 'true'
+        run: sleep 150
+
+      - name: Get the Forge build (last try)
+        if: steps.forge1.outputs.cache-hit != 'true' && steps.forge2.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         with:
           path: forge-build
