@@ -13,7 +13,8 @@ Every turn gives two rows: one from our side, one from the opponent's side.
 That way the scorekeeper learns from both decks' games, not only ours.
 
 The log lines it reads look like (one per player, every turn):
-    Turn: Position turn=7 active=yes life=14 poison=0 hand=3 ... player=Ai(1)-our_deck
+    Turn: Position turn=7 active=yes life=14 poison=0 hand=3 ... untapped_lands=2 ...
+          hand_counters=1 hand_removal=1 ... player=Ai(1)-our_deck
     Game Result: Game 3 ended in 41234 ms. Ai(2)-boros_dwarves has won!
 
 No card names or deck names go into the CSV: only numbers, and "us"/"opp"
@@ -46,8 +47,16 @@ RESULT_DRAW = re.compile(r"Game Result: Game (\d+) ended in a Draw")
 # The numbers each snapshot has, in the order they go into the CSV.
 # (Must match the patch's PositionLog.java; a missing number is written as 0.)
 NUMBERS = ["life", "poison", "hand", "library", "graveyard", "exile", "lands",
+           "untapped_lands",
            "creatures", "power", "toughness", "evasive_power", "tokens",
-           "walkers", "loyalty", "other_permanents"]
+           "walkers", "loyalty", "other_permanents",
+           "hand_lands", "hand_creatures", "hand_instant_speed",
+           "hand_counters", "hand_removal", "hand_mana_value"]
+
+# Snapshot version 2 (Nov 24, 2026) added untapped lands and what kind of cards
+# are in hand. Older logs don't have these numbers, so their rows get 0 for
+# them and version=1: step 2 must not mix the two versions blindly.
+VERSION_2_KEY = "untapped_lands"
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +87,7 @@ def read_games(log_text: str, ours: str) -> list[dict]:
             try:
                 turn = int(values.get("turn", "0"))
                 snapshot = {k: int(values.get(k, "0")) for k in NUMBERS}
+                snapshot["version"] = 2 if VERSION_2_KEY in values else 1
             except ValueError:
                 continue                      # a damaged line: skip it, don't stop
             entry = turns.setdefault(turn, {})
@@ -114,7 +124,8 @@ def rows_for(games: list[dict]) -> list[dict]:
                 else:
                     won = 1.0 if game["winner"] == me else 0.0
                 row = {"game": number, "turn": turn, "side": me,
-                       "active": 1 if entry.get("active") == me else 0, "won": won}
+                       "active": 1 if entry.get("active") == me else 0, "won": won,
+                       "version": min(entry[me]["version"], entry[other]["version"])}
                 for k in NUMBERS:
                     row["me_" + k] = entry[me][k]
                     row["opp_" + k] = entry[other][k]
@@ -145,7 +156,7 @@ def main() -> None:
 
     # Write the table (even when empty, so the workflow always has a file to save)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    columns = ["game", "turn", "side", "active", "won"] \
+    columns = ["game", "turn", "side", "active", "won", "version"] \
         + [p + k for k in NUMBERS for p in ("me_", "opp_")]
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns)

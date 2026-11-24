@@ -1,15 +1,21 @@
 diff --git a/forge-game/src/main/java/forge/game/PositionLog.java b/forge-game/src/main/java/forge/game/PositionLog.java
 new file mode 100644
-index 0000000..4df34b8
+index 0000000..2727e4c
 --- /dev/null
 +++ b/forge-game/src/main/java/forge/game/PositionLog.java
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,268 @@
 +package forge.game;
 +
++import java.util.EnumSet;
++import java.util.Set;
++
++import forge.game.ability.ApiType;
 +import forge.game.card.Card;
 +import forge.game.event.GameEventAddLog;
 +import forge.game.keyword.Keyword;
 +import forge.game.player.Player;
++import forge.game.spellability.AbilitySub;
++import forge.game.spellability.SpellAbility;
 +import forge.game.zone.ZoneType;
 +
 +/**
@@ -21,16 +27,35 @@ index 0000000..4df34b8
 + * <p>
 + * LOG ONLY: nothing in this class changes how a game is played. It only reads the game state.
 + * <p>
++ * WHEN: right as a new turn begins, BEFORE its untap step. So for the player whose turn just ENDED,
++ * "untapped_lands" is exactly the mana they left open for the opponent's turn (holding up a counter).
++ * <p>
 + * Example line, as it appears in the game log (one per player, every turn):
 + * <pre>
 + * Turn: Position turn=7 active=yes life=14 poison=0 hand=3 library=45 graveyard=6 exile=1 lands=4
-+ *       creatures=2 power=5 toughness=6 evasive_power=3 tokens=1 walkers=0 loyalty=0 other_permanents=1
-+ *       player=Ai(1)-our_deck
++ *       untapped_lands=2 creatures=2 power=5 toughness=6 evasive_power=3 tokens=1 walkers=0 loyalty=0
++ *       other_permanents=1 hand_lands=1 hand_creatures=0 hand_instant_speed=2 hand_counters=1
++ *       hand_removal=1 hand_mana_value=5 player=Ai(1)-our_deck
 + * </pre>
 + * The player's name is always last, because a name can contain spaces.
 + * Read by mtg-forge-sim's scripts/positions.py.
 + */
 +public final class PositionLog {
++
++    /** Effects that answer a spell: counterspells. */
++    private static final Set<ApiType> COUNTER_EFFECTS = EnumSet.of(ApiType.Counter);
++
++    /**
++     * Effects that remove creatures or other permanents: destroy, damage, sacrifice (edicts) and fight.
++     * (Exile and bounce effects are checked separately in isRemoval, because the same effect type
++     * is also used for things like tutors and flicker.)
++     */
++    private static final Set<ApiType> REMOVAL_EFFECTS = EnumSet.of(
++            ApiType.Destroy, ApiType.DestroyAll, ApiType.DealDamage, ApiType.DamageAll,
++            ApiType.Sacrifice, ApiType.SacrificeAll, ApiType.Fight);
++
++    /** How deep to follow "and then..." parts and charm modes of a spell (stops endless loops). */
++    private static final int MAX_DEPTH = 6;
 +
 +    /** Utility class: only static methods, never created. */
 +    private PositionLog() {
@@ -63,6 +88,16 @@ index 0000000..4df34b8
 +     * @return the log message, e.g. "Position turn=7 active=yes life=14 ... player=Ai(1)-our_deck"
 +     */
 +    private static String describe(final int turn, final Player player, final boolean isActive) {
++        // --- Lands: how many, and how many are still untapped (mana held open) ---
++        int lands = 0;
++        int untappedLands = 0;
++        for (final Card c : player.getLandsInPlay()) {
++            lands++;
++            if (!c.isTapped()) {
++                untappedLands++;
++            }
++        }
++
 +        // --- Creatures: how many, how big, and how much of their power is hard to block ---
 +        int creatures = 0;
 +        int power = 0;
@@ -100,6 +135,33 @@ index 0000000..4df34b8
 +            }
 +        }
 +
++        // --- What kind of cards are in hand (a human counts answers, not just cards) ---
++        int handLands = 0;
++        int handCreatures = 0;
++        int handInstantSpeed = 0;
++        int handCounters = 0;
++        int handRemoval = 0;
++        int handManaValue = 0;
++        for (final Card c : player.getCardsIn(ZoneType.Hand)) {
++            if (c.isLand()) {
++                handLands++;
++                continue;                       // a land is never also a spell in hand worth counting below
++            }
++            handManaValue += c.getCMC();
++            if (c.isCreature()) {
++                handCreatures++;
++            }
++            if (c.isInstant() || c.hasKeyword(Keyword.FLASH)) {
++                handInstantSpeed++;             // can be cast on the opponent's turn
++            }
++            if (spellHas(c, COUNTER_EFFECTS)) {
++                handCounters++;
++            }
++            if (spellHasRemoval(c)) {
++                handRemoval++;
++            }
++        }
++
 +        // --- Put it all on one line as key=value pairs (easy to read for a script and for a person) ---
 +        return "Position"
 +                + " turn=" + turn
@@ -110,7 +172,8 @@ index 0000000..4df34b8
 +                + " library=" + player.getZone(ZoneType.Library).size()
 +                + " graveyard=" + player.getZone(ZoneType.Graveyard).size()
 +                + " exile=" + player.getZone(ZoneType.Exile).size()
-+                + " lands=" + player.getLandsInPlay().size()
++                + " lands=" + lands
++                + " untapped_lands=" + untappedLands
 +                + " creatures=" + creatures
 +                + " power=" + power
 +                + " toughness=" + toughness
@@ -119,7 +182,94 @@ index 0000000..4df34b8
 +                + " walkers=" + walkers
 +                + " loyalty=" + loyalty
 +                + " other_permanents=" + otherPermanents
++                + " hand_lands=" + handLands
++                + " hand_creatures=" + handCreatures
++                + " hand_instant_speed=" + handInstantSpeed
++                + " hand_counters=" + handCounters
++                + " hand_removal=" + handRemoval
++                + " hand_mana_value=" + handManaValue
 +                + " player=" + player.getName();   // last: a name can contain spaces
++    }
++
++    // -------------------------------------------------------------------------------------------
++    // Helpers: does a card in hand have a counterspell or removal effect when cast?
++    // -------------------------------------------------------------------------------------------
++
++    /**
++     * True if casting this card (any of its spells, e.g. either half of a split card) uses one of the
++     * given effect types, in its main part, an "and then..." part, or one of its charm modes.
++     */
++    private static boolean spellHas(final Card card, final Set<ApiType> effects) {
++        for (final SpellAbility sa : card.getSpellAbilities()) {
++            if (sa.isSpell() && partHas(sa, effects, 0)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    /** Same as spellHas, but for removal (the effect list above, plus exile/bounce from the battlefield). */
++    private static boolean spellHasRemoval(final Card card) {
++        for (final SpellAbility sa : card.getSpellAbilities()) {
++            if (sa.isSpell() && partHasRemoval(sa, 0)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    /** Checks one part of a spell, then its "and then..." part and its charm modes. */
++    private static boolean partHas(final SpellAbility sa, final Set<ApiType> effects, final int depth) {
++        if (sa == null || depth > MAX_DEPTH) {
++            return false;
++        }
++        if (sa.getApi() != null && effects.contains(sa.getApi())) {
++            return true;
++        }
++        if (sa.getApi() == ApiType.Charm) {
++            for (final AbilitySub mode : sa.getAdditionalAbilityList("Choices")) {
++                if (partHas(mode, effects, depth + 1)) {
++                    return true;
++                }
++            }
++        }
++        return partHas(sa.getSubAbility(), effects, depth + 1);
++    }
++
++    /** Like partHas, for removal: also counts "exile/return target permanent" effects. */
++    private static boolean partHasRemoval(final SpellAbility sa, final int depth) {
++        if (sa == null || depth > MAX_DEPTH) {
++            return false;
++        }
++        if (sa.getApi() != null && REMOVAL_EFFECTS.contains(sa.getApi())) {
++            return true;
++        }
++        if (isExileOrBounce(sa)) {
++            return true;
++        }
++        if (sa.getApi() == ApiType.Charm) {
++            for (final AbilitySub mode : sa.getAdditionalAbilityList("Choices")) {
++                if (partHasRemoval(mode, depth + 1)) {
++                    return true;
++                }
++            }
++        }
++        return partHasRemoval(sa.getSubAbility(), depth + 1);
++    }
++
++    /**
++     * True for effects that move a permanent OFF the battlefield to somewhere else (exile, hand,
++     * library), like Swords to Plowshares or a bounce spell. Tutors and reanimation also use the
++     * "ChangeZone" effect type, but they move cards from other zones, so they don't count.
++     */
++    private static boolean isExileOrBounce(final SpellAbility sa) {
++        if (sa.getApi() != ApiType.ChangeZone && sa.getApi() != ApiType.ChangeZoneAll) {
++            return false;
++        }
++        final String origin = sa.getParam("Origin");
++        final String destination = sa.getParam("Destination");
++        return origin != null && origin.contains("Battlefield")
++                && destination != null && !destination.contains("Battlefield");
 +    }
 +}
 diff --git a/forge-game/src/main/java/forge/game/phase/PhaseHandler.java b/forge-game/src/main/java/forge/game/phase/PhaseHandler.java
