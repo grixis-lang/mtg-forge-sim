@@ -1,9 +1,9 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
-index 21f3630e..b0ce7f30 100644
+index 822bd9bb..f68254fd 100644
 --- a/forge-ai/src/main/java/forge/ai/AiController.java
 +++ b/forge-ai/src/main/java/forge/ai/AiController.java
-@@ -2321,6 +2321,16 @@ public class AiController {
-             }
+@@ -2515,6 +2515,16 @@ public class AiController {
+             });
          }
  
 +        // PRIORITIZE_HAND_DISRUPTION: on our own main phase, cast hand disruption before anything else
@@ -159,10 +159,10 @@ index 00000000..54188eed
 +    }
 +}
 diff --git a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-index 637db647..b5fef498 100644
+index 034bf5ff..6e0289f5 100644
 --- a/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
 +++ b/forge-ai/src/main/java/forge/ai/ability/ChangeZoneAi.java
-@@ -414,8 +414,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
+@@ -416,8 +416,10 @@ public class ChangeZoneAi extends SpellAbilityAi {
          // don't use fetching to top of library/graveyard before main2
          // (a tutor that only reveals the cards and hands them on with a follow-up, Gifts Ungiven, is a tutor to hand)
          final boolean revealsForPile = sa.hasParam("RememberChanged") && sa.getSubAbility() != null;
@@ -189,10 +189,10 @@ index 2dd93294..f861c2bd 100644
          }
  
 diff --git a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-index 61ca7591..0c310e0c 100644
+index f6e090b5..d8e514dd 100644
 --- a/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
 +++ b/forge-ai/src/main/java/forge/ai/simulation/FlatMonteCarloPicker.java
-@@ -1644,6 +1644,10 @@ public final class FlatMonteCarloPicker {
+@@ -1666,6 +1666,10 @@ public final class FlatMonteCarloPicker {
              return false;
          }
          final int mana = ComputerUtilMana.getAvailableManaEstimate(player, true);
