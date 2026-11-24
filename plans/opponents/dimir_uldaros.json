@@ -1,0 +1,17 @@
+{
+  "control": {
+    "_why": "Few creatures to kill: cut the cheap creature removal and the wipe. More counters and discard for a slow, spell-heavy opponent, and a second Emeritus as an extra threat.",
+    "in": {"Duress": 1, "Disdainful Stroke": 1, "Spell Snare": 1, "Emeritus of Ideation": 1},
+    "out": {"Requiting Hex": 3, "Deadly Cover-Up": 1}
+  },
+  "midrange": {
+    "_why": "Creature fights: Day of Black Sun and an extra Deadly Cover-Up for wide boards, Qarsi Revenant as a flying deathtouch lifelink body. Cuts discard and the narrow counter.",
+    "in": {"Day of Black Sun": 2, "Qarsi Revenant": 2, "Deadly Cover-Up": 1},
+    "out": {"Duress": 2, "Spell Snare": 1, "Winternight Stories": 1, "Theorix Charm": 1}
+  },
+  "aggro": {
+    "_why": "Survive the early turns: Day of Black Sun for cheap creatures, Qarsi Revenant to block and gain life, Flashfreeze vs red or green spells. Cuts the slow card draw and discard.",
+    "in": {"Day of Black Sun": 2, "Qarsi Revenant": 2, "Flashfreeze": 2},
+    "out": {"Duress": 2, "Winternight Stories": 2, "Strategic Betrayal": 1, "Vraska's Final Mercy": 1}
+  }
+}
