@@ -1,12 +1,14 @@
 diff --git a/forge-game/src/main/java/forge/game/PositionLog.java b/forge-game/src/main/java/forge/game/PositionLog.java
 new file mode 100644
-index 0000000..2727e4c
+index 0000000..19cf120
 --- /dev/null
 +++ b/forge-game/src/main/java/forge/game/PositionLog.java
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,303 @@
 +package forge.game;
 +
 +import java.util.EnumSet;
++import java.util.LinkedHashMap;
++import java.util.Map;
 +import java.util.Set;
 +
 +import forge.game.ability.ApiType;
@@ -24,6 +26,10 @@ index 0000000..2727e4c
 + * These lines are the training data for our learned position evaluator (the "scorekeeper" of the
 + * new AI brain): each snapshot is later paired with who won that game, so a script can learn which
 + * board numbers really predict a win in our matchups.
++ * <p>
++ * The same counting code ({@link #boardNumbers(Player)}) is used by the learned scorekeeper itself
++ * (forge-ai LearnedEvaluator, patch 21), so the numbers it scores are counted exactly like the
++ * numbers it learned from.
 + * <p>
 + * LOG ONLY: nothing in this class changes how a game is played. It only reads the game state.
 + * <p>
@@ -47,7 +53,7 @@ index 0000000..2727e4c
 +
 +    /**
 +     * Effects that remove creatures or other permanents: destroy, damage, sacrifice (edicts) and fight.
-+     * (Exile and bounce effects are checked separately in isRemoval, because the same effect type
++     * (Exile and bounce effects are checked separately in isExileOrBounce, because the same effect type
 +     * is also used for things like tutors and flicker.)
 +     */
 +    private static final Set<ApiType> REMOVAL_EFFECTS = EnumSet.of(
@@ -80,14 +86,27 @@ index 0000000..2727e4c
 +    }
 +
 +    /**
-+     * Builds the snapshot text for one player.
-+     *
-+     * @param turn     Forge's turn number (counts every player's turn)
-+     * @param player   the player to describe
-+     * @param isActive true if it is this player's turn
-+     * @return the log message, e.g. "Position turn=7 active=yes life=14 ... player=Ai(1)-our_deck"
++     * Builds the snapshot text for one player: "Position turn=.. active=.. [board numbers] player=..".
 +     */
 +    private static String describe(final int turn, final Player player, final boolean isActive) {
++        final StringBuilder sb = new StringBuilder("Position");
++        sb.append(" turn=").append(turn);
++        sb.append(" active=").append(isActive ? "yes" : "no");
++        for (final Map.Entry<String, Integer> e : boardNumbers(player).entrySet()) {
++            sb.append(' ').append(e.getKey()).append('=').append(e.getValue());
++        }
++        sb.append(" player=").append(player.getName());   // last: a name can contain spaces
++        return sb.toString();
++    }
++
++    /**
++     * Counts one player's board numbers, in the order they appear in the log line.
++     * Used for the log AND by the learned scorekeeper, so both always count the same way.
++     *
++     * @param player the player to count for
++     * @return name -> number, e.g. "life" -> 14, "hand" -> 3, ... (always all names, in log order)
++     */
++    public static Map<String, Integer> boardNumbers(final Player player) {
 +        // --- Lands: how many, and how many are still untapped (mana held open) ---
 +        int lands = 0;
 +        int untappedLands = 0;
@@ -106,11 +125,10 @@ index 0000000..2727e4c
 +        int tokens = 0;
 +        for (final Card c : player.getCreaturesInPlay()) {
 +            creatures++;
-+            // Negative power (e.g. a -2/-2 shrunk creature) deals no damage, so count it as 0
-+            final int p = Math.max(0, c.getNetPower());
++            final int p = creaturePower(c);
 +            power += p;
-+            toughness += Math.max(0, c.getNetToughness());
-+            if (c.hasKeyword(Keyword.FLYING) || c.hasKeyword(Keyword.MENACE) || c.hasKeyword(Keyword.TRAMPLE)) {
++            toughness += creatureToughness(c);
++            if (isEvasive(c)) {
 +                evasivePower += p;
 +            }
 +            if (c.isToken()) {
@@ -162,33 +180,50 @@ index 0000000..2727e4c
 +            }
 +        }
 +
-+        // --- Put it all on one line as key=value pairs (easy to read for a script and for a person) ---
-+        return "Position"
-+                + " turn=" + turn
-+                + " active=" + (isActive ? "yes" : "no")
-+                + " life=" + player.getLife()
-+                + " poison=" + player.getPoisonCounters()
-+                + " hand=" + player.getZone(ZoneType.Hand).size()
-+                + " library=" + player.getZone(ZoneType.Library).size()
-+                + " graveyard=" + player.getZone(ZoneType.Graveyard).size()
-+                + " exile=" + player.getZone(ZoneType.Exile).size()
-+                + " lands=" + lands
-+                + " untapped_lands=" + untappedLands
-+                + " creatures=" + creatures
-+                + " power=" + power
-+                + " toughness=" + toughness
-+                + " evasive_power=" + evasivePower
-+                + " tokens=" + tokens
-+                + " walkers=" + walkers
-+                + " loyalty=" + loyalty
-+                + " other_permanents=" + otherPermanents
-+                + " hand_lands=" + handLands
-+                + " hand_creatures=" + handCreatures
-+                + " hand_instant_speed=" + handInstantSpeed
-+                + " hand_counters=" + handCounters
-+                + " hand_removal=" + handRemoval
-+                + " hand_mana_value=" + handManaValue
-+                + " player=" + player.getName();   // last: a name can contain spaces
++        // --- All numbers, in log order (a LinkedHashMap keeps the order things are put in) ---
++        final Map<String, Integer> n = new LinkedHashMap<>();
++        n.put("life", player.getLife());
++        n.put("poison", player.getPoisonCounters());
++        n.put("hand", player.getZone(ZoneType.Hand).size());
++        n.put("library", player.getZone(ZoneType.Library).size());
++        n.put("graveyard", player.getZone(ZoneType.Graveyard).size());
++        n.put("exile", player.getZone(ZoneType.Exile).size());
++        n.put("lands", lands);
++        n.put("untapped_lands", untappedLands);
++        n.put("creatures", creatures);
++        n.put("power", power);
++        n.put("toughness", toughness);
++        n.put("evasive_power", evasivePower);
++        n.put("tokens", tokens);
++        n.put("walkers", walkers);
++        n.put("loyalty", loyalty);
++        n.put("other_permanents", otherPermanents);
++        n.put("hand_lands", handLands);
++        n.put("hand_creatures", handCreatures);
++        n.put("hand_instant_speed", handInstantSpeed);
++        n.put("hand_counters", handCounters);
++        n.put("hand_removal", handRemoval);
++        n.put("hand_mana_value", handManaValue);
++        return n;
++    }
++
++    // -------------------------------------------------------------------------------------------
++    // Creature helpers (public so the learned scorekeeper values a creature the same way)
++    // -------------------------------------------------------------------------------------------
++
++    /** A creature's power as counted in snapshots (negative power deals no damage, so it counts as 0). */
++    public static int creaturePower(final Card c) {
++        return Math.max(0, c.getNetPower());
++    }
++
++    /** A creature's toughness as counted in snapshots (never below 0). */
++    public static int creatureToughness(final Card c) {
++        return Math.max(0, c.getNetToughness());
++    }
++
++    /** True if the creature is hard to block: flying, menace or trample. */
++    public static boolean isEvasive(final Card c) {
++        return c.hasKeyword(Keyword.FLYING) || c.hasKeyword(Keyword.MENACE) || c.hasKeyword(Keyword.TRAMPLE);
 +    }
 +
 +    // -------------------------------------------------------------------------------------------

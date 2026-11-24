@@ -1,0 +1,313 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiProps.java b/forge-ai/src/main/java/forge/ai/AiProps.java
+index bcf8e8d..0b3ce09 100644
+--- a/forge-ai/src/main/java/forge/ai/AiProps.java
++++ b/forge-ai/src/main/java/forge/ai/AiProps.java
+@@ -29,6 +29,11 @@ public enum AiProps {
+     DEFAULT_MAX_PLANAR_DIE_ROLLS_PER_TURN ("1"),
+     DEFAULT_MIN_TURN_TO_ROLL_PLANAR_DIE ("3"),
+     DEFAULT_PLANAR_DIE_ROLL_CHANCE ("50"),
++    // mtg-forge-sim (patch 21): the AI brain's learned scorekeeper (see simulation/LearnedEvaluator).
++    /** Score look-ahead positions with the learned weights instead of Forge's hand-written formula. */
++    LEARNED_EVAL ("false"),
++    /** The learned weights, one line written by mtg-forge-sim's scripts/train_scorekeeper.py (no "=" inside). */
++    LEARNED_EVAL_WEIGHTS (""),
+     MULLIGAN_THRESHOLD ("5"),
+     PLANAR_DIE_ROLL_HESITATION_CHANCE ("10"),
+     HOLD_LAND_DROP_FOR_MAIN2_IF_UNUSED ("0"),
+diff --git a/forge-ai/src/main/java/forge/ai/simulation/GameStateEvaluator.java b/forge-ai/src/main/java/forge/ai/simulation/GameStateEvaluator.java
+index 3b8ae34..30bc7c2 100644
+--- a/forge-ai/src/main/java/forge/ai/simulation/GameStateEvaluator.java
++++ b/forge-ai/src/main/java/forge/ai/simulation/GameStateEvaluator.java
+@@ -117,6 +117,11 @@ public class GameStateEvaluator {
+     }
+ 
+     private Score getScoreForGameStateImpl(Game game, Player aiPlayer) {
++        // mtg-forge-sim (patch 21): the learned scorekeeper, only when this player's AI profile turns it on
++        final Score learned = LearnedEvaluator.score(game, aiPlayer);
++        if (learned != null) {
++            return learned;
++        }
+         // TODO: try and reuse evaluateBoardPosition
+         int score = 0;
+         int aiCards = 0;
+diff --git a/forge-ai/src/main/java/forge/ai/simulation/LearnedEvaluator.java b/forge-ai/src/main/java/forge/ai/simulation/LearnedEvaluator.java
+new file mode 100644
+index 0000000..4a88c0c
+--- /dev/null
++++ b/forge-ai/src/main/java/forge/ai/simulation/LearnedEvaluator.java
+@@ -0,0 +1,275 @@
++package forge.ai.simulation;
++
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++
++import forge.ai.AiProfileUtil;
++import forge.ai.AiProps;
++import forge.game.Game;
++import forge.game.PositionLog;
++import forge.game.card.Card;
++import forge.game.phase.PhaseType;
++import forge.game.player.Player;
++
++/**
++ * mtg-forge-sim (patch 21): the AI brain's LEARNED SCOREKEEPER.
++ * <p>
++ * Forge's look-ahead (Flat Monte Carlo) imagines a play, plays the turn out, and then asks "how good is
++ * this board for me?". Normally a hand-written formula answers that (GameStateEvaluator). When a
++ * player's AI profile has {@code LEARNED_EVAL=true}, this class answers instead, with weights learned
++ * from thousands of our own Forge games (scripts/train_scorekeeper.py in mtg-forge-sim).
++ * <p>
++ * How the score is worked out:
++ * <ol>
++ *   <li>Count both players' board numbers with the SAME code that wrote the training snapshots
++ *       ({@link PositionLog#boardNumbers(Player)}), so nothing is counted differently.</li>
++ *   <li>Pick the weights for the game stage (early / mid / late, by Forge's turn number).</li>
++ *   <li>win score = bias + sum of weight x (my number - opponent's number) + weight x (is it my turn).</li>
++ *   <li>Multiply by "scale" so the score is about the same size as Forge's own points. The look-ahead adds
++ *       bonuses (holding up mana, risk...) and margins in Forge's points, so the sizes must match.</li>
++ * </ol>
++ * Won and lost games are still scored by Forge (a win always beats any board).
++ * <p>
++ * Settings ({@code LEARNED_EVAL_WEIGHTS}, one line in the profile, written by the training script).
++ * It must not contain "=" (Forge's profile reader would silently drop the line), so it uses ":" and ";":
++ * <pre>
++ * inputs:life,poison,hand,...,active;scale:310.5;early:1,6,BIAS,W1,W2,...;mid:7,12,...;late:13,10000,...
++ * </pre>
++ * Each stage lists: first turn, last turn, bias, then one weight per input, in the "inputs" order.
++ * Every input except "active" means "my number minus the opponent's number".
++ * <p>
++ * If the settings are missing or broken, it prints one warning and Forge's own formula is used.
++ */
++public final class LearnedEvaluator {
++
++    /** Scores stay well inside int, and away from the win/loss values. */
++    private static final double MAX_POINTS = 1_000_000;
++
++    /** Parsed settings, kept per settings text (each profile is parsed once, not on every score). */
++    private static final Map<String, Model> MODELS = new ConcurrentHashMap<>();
++
++    /** Stands for "these settings are broken" in MODELS (a ConcurrentHashMap can't hold null). */
++    private static final Model BROKEN = new Model(new String[0], 0, new ArrayList<>());
++
++    /** So the "brain is on" line is printed only once per Forge copy. */
++    private static volatile boolean announced = false;
++
++    /** Utility class: only static methods, never created. */
++    private LearnedEvaluator() {
++    }
++
++    /**
++     * The learned score of this position for {@code ai}, or null when the learned scorekeeper is off
++     * (or can't be used here), in which case Forge's own formula is used.
++     *
++     * @param game the game (usually a copy the look-ahead is playing out)
++     * @param ai   the player the score is for
++     * @return the score in Forge-sized points, or null
++     */
++    public static GameStateEvaluator.Score score(final Game game, final Player ai) {
++        // 1. Is it switched on in this player's AI profile?
++        if (!AiProfileUtil.getBoolProperty(ai, AiProps.LEARNED_EVAL)) {
++            return null;
++        }
++        final Model model = model(AiProfileUtil.getProperty(ai, AiProps.LEARNED_EVAL_WEIGHTS));
++        if (model == null) {
++            return null;
++        }
++        final Player opponent = ai.getWeakestOpponent();
++        if (opponent == null) {
++            return null;
++        }
++
++        // 2. The weights for this game stage
++        final Stage stage = model.stageFor(game.getPhaseHandler().getTurn());
++        if (stage == null) {
++            return null;
++        }
++
++        // 3. Count both boards the same way the training snapshots did, and add up the score
++        final Map<String, Integer> mine = PositionLog.boardNumbers(ai);
++        final Map<String, Integer> theirs = PositionLog.boardNumbers(opponent);
++        final boolean myTurn = game.getPhaseHandler().isPlayerTurn(ai);
++        double winScore = stage.bias;
++        for (int i = 0; i < model.inputs.length; i++) {
++            final String name = model.inputs[i];
++            final double x = "active".equals(name)
++                    ? (myTurn ? 1 : 0)
++                    : mine.getOrDefault(name, 0) - theirs.getOrDefault(name, 0);
++            winScore += stage.weights[i] * x;
++        }
++
++        // 4. "Available" value, like Forge's formula: before the second main phase, my creatures that
++        //    can't attack yet (summoning sick) count as nothing. Used by Forge's older simulation AI.
++        double sickValue = 0;
++        if (game.getPhaseHandler().getPhase().isBefore(PhaseType.MAIN2)) {
++            for (final Card c : ai.getCreaturesInPlay()) {
++                if (c.isSick()) {
++                    sickValue += model.creatureValue(stage, c);
++                }
++            }
++        }
++
++        announce(model);
++        return new GameStateEvaluator.Score(toPoints(model.scale * winScore),
++                toPoints(model.scale * (winScore - sickValue)));
++    }
++
++    /** Rounds to whole points and keeps the score far from Forge's win/loss values. */
++    private static int toPoints(final double points) {
++        return (int) Math.round(Math.max(-MAX_POINTS, Math.min(MAX_POINTS, points)));
++    }
++
++    /** Prints one line per Forge copy, so a run's log shows the brain was really used. */
++    private static void announce(final Model model) {
++        if (!announced) {
++            announced = true;
++            System.out.println("[brain] learned scorekeeper on (" + model.stages.size() + " stages, "
++                    + model.inputs.length + " inputs, scale " + model.scale + ")");
++        }
++    }
++
++    // -------------------------------------------------------------------------------------------
++    // Reading the settings
++    // -------------------------------------------------------------------------------------------
++
++    /** The parsed settings for this text (parsed once, then reused). Null if missing or broken. */
++    private static Model model(final String settings) {
++        if (settings == null || settings.isEmpty()) {
++            warnOnce("LEARNED_EVAL is on but LEARNED_EVAL_WEIGHTS is empty: using Forge's own formula");
++            return null;
++        }
++        final Model m = MODELS.computeIfAbsent(settings, LearnedEvaluator::parse);
++        return m == BROKEN ? null : m;
++    }
++
++    /** Turns the settings text into a Model, or BROKEN (with one warning) if anything is wrong. */
++    private static Model parse(final String settings) {
++        try {
++            String[] inputs = null;
++            double scale = 1;
++            final List<Stage> stages = new ArrayList<>();
++            for (final String part : settings.split(";")) {
++                final int colon = part.indexOf(':');
++                if (colon < 0) {
++                    continue;
++                }
++                final String key = part.substring(0, colon).trim();
++                final String value = part.substring(colon + 1).trim();
++                if ("inputs".equals(key)) {
++                    inputs = value.split(",");
++                } else if ("scale".equals(key)) {
++                    scale = Double.parseDouble(value);
++                } else {
++                    // a stage: first turn, last turn, bias, then the weights
++                    final String[] nums = value.split(",");
++                    final double[] weights = new double[nums.length - 3];
++                    for (int i = 0; i < weights.length; i++) {
++                        weights[i] = Double.parseDouble(nums[i + 3]);
++                    }
++                    stages.add(new Stage(key, Integer.parseInt(nums[0].trim()), Integer.parseInt(nums[1].trim()),
++                            Double.parseDouble(nums[2]), weights));
++                }
++            }
++            if (inputs == null || stages.isEmpty()) {
++                warnOnce("LEARNED_EVAL_WEIGHTS has no inputs or no stages: using Forge's own formula");
++                return BROKEN;
++            }
++            for (final Stage s : stages) {
++                if (s.weights.length != inputs.length) {
++                    warnOnce("LEARNED_EVAL_WEIGHTS stage '" + s.name + "' has " + s.weights.length
++                            + " weights for " + inputs.length + " inputs: using Forge's own formula");
++                    return BROKEN;
++                }
++            }
++            return new Model(inputs, scale, stages);
++        } catch (final RuntimeException e) {       // a number that isn't a number, a missing part...
++            warnOnce("LEARNED_EVAL_WEIGHTS could not be read (" + e.getMessage() + "): using Forge's own formula");
++            return BROKEN;
++        }
++    }
++
++    /** So a broken setting is reported once, not on every score. */
++    private static volatile boolean warned = false;
++
++    private static void warnOnce(final String message) {
++        if (!warned) {
++            warned = true;
++            System.err.println("[brain] " + message);
++        }
++    }
++
++    // -------------------------------------------------------------------------------------------
++    // The parsed settings
++    // -------------------------------------------------------------------------------------------
++
++    /** One game stage's weights. */
++    private static final class Stage {
++        final String name;
++        final int firstTurn;
++        final int lastTurn;
++        final double bias;
++        final double[] weights;
++
++        Stage(final String name, final int firstTurn, final int lastTurn, final double bias, final double[] weights) {
++            this.name = name;
++            this.firstTurn = firstTurn;
++            this.lastTurn = lastTurn;
++            this.bias = bias;
++            this.weights = weights;
++        }
++    }
++
++    /** All the settings: which inputs, the size of a point, and the stages. */
++    private static final class Model {
++        final String[] inputs;
++        final double scale;
++        final List<Stage> stages;
++
++        Model(final String[] inputs, final double scale, final List<Stage> stages) {
++            this.inputs = inputs;
++            for (int i = 0; i < inputs.length; i++) {
++                inputs[i] = inputs[i].trim();
++            }
++            this.scale = scale;
++            this.stages = stages;
++        }
++
++        /** The stage for this turn: the one whose turns include it (or the last stage, for very long games). */
++        Stage stageFor(final int turn) {
++            for (final Stage s : stages) {
++                if (turn >= s.firstTurn && turn <= s.lastTurn) {
++                    return s;
++                }
++            }
++            return stages.isEmpty() ? null : stages.get(stages.size() - 1);
++        }
++
++        /** The weight of one input in this stage (0 if the settings don't use it). */
++        double weight(final Stage stage, final String name) {
++            for (int i = 0; i < inputs.length; i++) {
++                if (inputs[i].equals(name)) {
++                    return stage.weights[i];
++                }
++            }
++            return 0;
++        }
++
++        /** What one of my creatures adds to my win score in this stage (counted like PositionLog does). */
++        double creatureValue(final Stage stage, final Card c) {
++            final int p = PositionLog.creaturePower(c);
++            double v = weight(stage, "creatures")
++                    + weight(stage, "power") * p
++                    + weight(stage, "toughness") * PositionLog.creatureToughness(c);
++            if (PositionLog.isEvasive(c)) {
++                v += weight(stage, "evasive_power") * p;
++            }
++            if (c.isToken()) {
++                v += weight(stage, "tokens");
++            }
++            return v;
++        }
++    }
++}

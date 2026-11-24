@@ -318,6 +318,11 @@ def main() -> None:
     args = get_args()
     start = time.time()
     output, problems, replayed = run_forge(args)
+    # AI brain (Forge patch 21): each Forge copy prints one line when it uses the learned scorekeeper.
+    # A count only (no names), so a run's log shows whether the Brain profile really played.
+    brain_copies = sum(1 for line in output.splitlines() if line.startswith("[brain] learned scorekeeper on"))
+    if brain_copies:
+        print(f"AI brain: the learned scorekeeper was used in {brain_copies} Forge cop{'y' if brain_copies == 1 else 'ies'}")
     result = count_bo3(output, args.ours) if args.bo3 else count_results(output, args.ours)
     if args.log_out:
         log_path = Path(args.log_out)

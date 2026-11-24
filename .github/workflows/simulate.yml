@@ -134,9 +134,11 @@ jobs:
           [ "$DECK" = "candidates/$OURS.txt" ] || cp "$DECK" "candidates/$OURS.txt"
           if [ -n "$PLANS" ]; then cp "$PLANS" "plans/$OURS.json"; fi
           # Private sim helpers: card fixes and our AI profiles (packed into the encrypted artifact below)
-          mkdir -p engine/card_overrides engine/ai_profiles
+          mkdir -p engine/card_overrides engine/ai_profiles engine/scorekeeper
           cp private/engine/card_overrides/*.txt engine/card_overrides/ 2>/dev/null || true
           cp private/engine/ai_profiles/*.ai engine/ai_profiles/ 2>/dev/null || true
+          # AI brain (patch 21): the learned scorekeeper's settings, used to build the Brain profile
+          cp private/engine/scorekeeper/brain_settings.txt engine/scorekeeper/ 2>/dev/null || true
           echo "Private helpers: $(ls engine/card_overrides | wc -l) card fixes, $(ls engine/ai_profiles | wc -l) AI profiles"
           rm -rf private found.txt
 
@@ -391,6 +393,13 @@ jobs:
           cp engine/ai_profiles/*.ai forge-build/forge-gui/res/ai/ 2>/dev/null || true
           # Public profiles for meta decks (e.g. MetaControl for the control decks, see plans/opponent_ai.json)
           cp ai_profiles/*.ai forge-build/forge-gui/res/ai/ 2>/dev/null || true
+          # AI brain (patch 21): the Brain profile = Forge's own Hardest profile + the learned scorekeeper.
+          # Built here on every run, so it always matches the Hardest profile of this Forge build.
+          if [ -f engine/scorekeeper/brain_settings.txt ]; then
+            { cat forge-build/forge-gui/res/ai/Hardest.ai; echo; cat engine/scorekeeper/brain_settings.txt; } \
+              > forge-build/forge-gui/res/ai/Brain.ai
+            echo "Brain profile built (Hardest + learned scorekeeper)"
+          fi
           # Stop early if the chosen profile doesn't exist (otherwise Forge would quietly use another one)
           if [ -n "$PROFILE" ] && [ ! -f "forge-build/forge-gui/res/ai/$PROFILE.ai" ]; then
             echo "The AI profile you chose is not in the private repo's engine/ai_profiles/"; exit 1

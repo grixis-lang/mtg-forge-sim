@@ -20,8 +20,16 @@ What it does, in plain words:
          GameStateEvaluator, rebuilt from the same board numbers)
   5. Checks it on decks it has NEVER seen: for each opponent deck, it learns
      from all the other matchups and is tested on that deck's games.
-  6. Writes the weights (JSON, for step 3's Forge patch) and a short report
-     (Markdown) that also shows what each number is "worth in life points".
+  6. Writes the weights (JSON), a short report (Markdown) that also shows what
+     each number is "worth in life points", and the two lines our Brain AI
+     profile needs (brain_settings.txt, read by Forge patch 21).
+
+Good things never count against you: more life, cards in hand, lands, creatures,
+power, toughness, planeswalkers, loyalty and other permanents can't get a
+negative weight (if the best fit wants one, that number is left at 0 and the
+rest is fitted again). Without this, numbers that move together (creatures,
+power, toughness) share credit unevenly and one can end up below zero, which
+would make the AI think, say, more power is bad.
 
 Library, graveyard and exile sizes are NOT used as inputs: a deck always has
 about 60 cards spread over library, hand, battlefield, graveyard and exile, so
@@ -35,7 +43,8 @@ How to run (Python 3.10+ and numpy: `pip install numpy`), from the private repo 
     python3 <public repo>/scripts/train_scorekeeper.py \\
         --data "decks/*/results/positions/*.csv" \\
         --weights engine/scorekeeper/weights_v1.json \\
-        --report engine/scorekeeper/report_v1.md
+        --report engine/scorekeeper/report_v1.md \\
+        --settings engine/scorekeeper/brain_settings.txt
 Options:
     --version 1   use only the board numbers every snapshot has (default)
     --version 2   also use mana held open and kinds of cards in hand
@@ -72,6 +81,10 @@ V2_EXTRA = ["untapped_lands", "hand_lands", "hand_creatures", "hand_instant_spee
 
 # Numbers that are NOT used as inputs (see the note at the top of this file).
 NOT_INPUTS = {"library", "graveyard", "exile"}
+
+# "Good" numbers: having more than the opponent can never lower your score.
+NEVER_NEGATIVE = {"life", "hand", "lands", "creatures", "power", "toughness", "evasive_power",
+                  "walkers", "loyalty", "other_permanents", "hand_counters", "hand_removal"}
 
 # Game stages, by Forge's turn number (it counts BOTH players' turns,
 # so turn 6 = the end of each player's 3rd turn).
@@ -159,10 +172,26 @@ def sigmoid(z):
     return 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
 
 
-def fit_logistic(X, y):
+def fit_logistic(X, y, never_negative=()):
     """Learns weights w and a bias b so that sigmoid(X @ w + b) ~ chance to win.
-    Inputs are scaled first (so big numbers don't dominate), and the weights are
-    scaled back at the end, so they work on raw board numbers."""
+    Columns listed in never_negative can't get a weight below zero: if one would,
+    it is fixed at 0 and the others are fitted again (repeated until none is negative)."""
+    fixed = set()
+    while True:
+        keep = [i for i in range(X.shape[1]) if i not in fixed]
+        w_part, b = _fit_logistic(X[:, keep], y)
+        w = np.zeros(X.shape[1])
+        w[keep] = w_part
+        # the most negative "good" weight (measured in spread-adjusted units), if any
+        bad = [(w[i] * X[:, i].std(), i) for i in never_negative if i not in fixed and w[i] < 0]
+        if not bad:
+            return w, b
+        fixed.add(min(bad)[1])
+
+
+def _fit_logistic(X, y):
+    """Plain logistic regression. Inputs are scaled first (so big numbers don't dominate),
+    and the weights are scaled back at the end, so they work on raw board numbers."""
     mean, std = X.mean(axis=0), X.std(axis=0)
     std[std == 0] = 1.0                                  # a number that never changes
     Z = np.hstack([(X - mean) / std, np.ones((len(X), 1))])
@@ -231,7 +260,7 @@ def measure(p, y):
     return acc, loss
 
 
-def unseen_deck_test(X, y, RAW, col, turn, opponent):
+def unseen_deck_test(X, y, RAW, col, turn, opponent, nonneg):
     """For each opponent deck: learn from all OTHER matchups (mid game), then test
     on that deck's games. Shows whether the scorekeeper works on new decks."""
     mid = (turn >= STAGES[1][1]) & (turn <= STAGES[1][2])
@@ -241,7 +270,7 @@ def unseen_deck_test(X, y, RAW, col, turn, opponent):
         tr = mid & (opponent != deck)
         if te.sum() < MIN_UNSEEN_ROWS:
             continue
-        w, b = fit_logistic(X[tr], y[tr])
+        w, b = fit_logistic(X[tr], y[tr], nonneg)
         learned = measure(sigmoid(X[te] @ w + b), y[te])[0]
         forge = measure(calibrate(forge_score(RAW[tr], col), y[tr])(forge_score(RAW[te], col)), y[te])[0]
         results.append((deck, int(te.sum()), learned, forge))
@@ -249,7 +278,48 @@ def unseen_deck_test(X, y, RAW, col, turn, opponent):
 
 
 # ---------------------------------------------------------------------------
-# 7. Main
+# 7. The Brain profile's settings line
+# ---------------------------------------------------------------------------
+def brain_settings(names, scale, weights_out) -> str:
+    """One line for LEARNED_EVAL_WEIGHTS. No "=" allowed inside (Forge's profile reader would
+    silently drop the line), so it uses "key:value" parts joined by ";":
+        inputs:life,hand,...,active;scale:310.5;early:1,6,BIAS,W1,W2,...;mid:...;late:..."""
+    inputs = [n.replace("diff_", "", 1) for n in names]          # Forge counts the raw names
+    parts = ["inputs:" + ",".join(inputs), f"scale:{scale:.6g}"]
+    for stage, ws in weights_out.items():
+        lo, hi = ws["turns"]
+        nums = [str(lo), str(min(hi, 10_000)), f"{ws['bias']:.6g}"] + [f"{ws['weights'][n]:.6g}" for n in names]
+        parts.append(f"{stage}:" + ",".join(nums))
+    line = ";".join(parts)
+    assert "=" not in line
+    return line
+
+
+def check_settings(settings, X, turn, names, weights_out, scale) -> None:
+    """Reads the line back the way Forge patch 21 does, scores 1,000 rows with it, and stops
+    if it doesn't match the trained weights (so a broken line never reaches Forge)."""
+    inputs, stages = None, []
+    for part in settings.split(";"):
+        key, value = part.split(":", 1)
+        if key == "inputs":
+            inputs = value.split(",")
+        elif key != "scale":
+            nums = value.split(",")
+            stages.append((int(nums[0]), int(nums[1]), float(nums[2]), [float(v) for v in nums[3:]]))
+    assert inputs and all(len(st[3]) == len(inputs) for st in stages), "settings line has the wrong shape"
+    rng = np.random.default_rng(0)
+    for i in rng.choice(len(X), size=min(1000, len(X)), replace=False):
+        lo, hi, bias, w = next(st for st in stages if st[0] <= turn[i] <= st[1]) if any(
+            st[0] <= turn[i] <= st[1] for st in stages) else stages[-1]
+        from_line = bias + sum(wi * xi for wi, xi in zip(w, X[i]))
+        stage = next(s for s, ws in weights_out.items() if ws["turns"][0] <= turn[i] <= ws["turns"][1])
+        from_model = weights_out[stage]["bias"] + sum(weights_out[stage]["weights"][n] * X[i][j] for j, n in enumerate(names))
+        assert abs(from_line - from_model) < 1e-3 * max(1.0, abs(from_model)), "settings line doesn't match the weights"
+    print("  settings line checked: it gives the same scores as the trained weights")
+
+
+# ---------------------------------------------------------------------------
+# 8. Main
 # ---------------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser(description="Train the AI brain's learned scorekeeper.")
@@ -258,6 +328,7 @@ def main() -> None:
     ap.add_argument("--version", type=int, choices=[1, 2], default=1)
     ap.add_argument("--weights", default="engine/scorekeeper/weights_v1.json")
     ap.add_argument("--report", default="engine/scorekeeper/report_v1.md")
+    ap.add_argument("--settings", default="engine/scorekeeper/brain_settings.txt")
     ap.add_argument("--seed", type=int, default=7)
     args = ap.parse_args()
 
@@ -266,6 +337,7 @@ def main() -> None:
     if not rows:
         sys.exit(f"No {args.ai} snapshot rows found for: {args.data}")
     RAW, col, X, names, y, turn, opponent = to_arrays(rows, args.version)
+    nonneg = [i for i, n in enumerate(names) if n.replace("diff_", "", 1) in NEVER_NEGATIVE]
     is_test, n_train_games, n_test_games = split_games(rows, args.seed)
     print(f"Read {info['games']} games ({len(rows)} rows) from {info['files']} files; "
           f"learning from {n_train_games} games, testing on {n_test_games}.")
@@ -278,7 +350,7 @@ def main() -> None:
         if tr.sum() < 200 or te.sum() < 50:
             print(f"  {stage}: not enough rows, skipped")
             continue
-        w, b = fit_logistic(X[tr], y[tr])
+        w, b = fit_logistic(X[tr], y[tr], nonneg)
         learned = measure(sigmoid(X[te] @ w + b), y[te])
         life = measure(calibrate(life_score(RAW[tr], col), y[tr])(life_score(RAW[te], col)), y[te])
         forge = measure(calibrate(forge_score(RAW[tr], col), y[tr])(forge_score(RAW[te], col)), y[te])
@@ -289,7 +361,7 @@ def main() -> None:
               f"learned {learned[0]:.1%} | Forge-style {forge[0]:.1%} | life only {life[0]:.1%}")
 
     # --- 3. unseen decks ---
-    unseen = unseen_deck_test(X, y, RAW, col, turn, opponent)
+    unseen = unseen_deck_test(X, y, RAW, col, turn, opponent, nonneg)
     if unseen:
         avg_l = sum(r[2] for r in unseen) / len(unseen)
         avg_f = sum(r[3] for r in unseen) / len(unseen)
@@ -304,7 +376,15 @@ def main() -> None:
         worth[stage] = {k: (ws["weights"]["diff_" + k] / life_w if life_w else float("nan"))
                         for k in input_numbers(args.version) if k != "life"}
 
-    # --- 5. save the weights (numbers only) ---
+    # --- 5. the size of one point: make the learned score spread about as much as Forge's own
+    #        score does (mid game), so the look-ahead's bonuses and margins keep their weight ---
+    mid_tr = (turn >= STAGES[1][1]) & (turn <= STAGES[1][2]) & ~is_test
+    mid_w = weights_out["mid"]["weights"] if "mid" in weights_out else next(iter(weights_out.values()))["weights"]
+    mid_logit = X[mid_tr] @ np.array([mid_w[n] for n in names])
+    scale = float(np.std(forge_score(RAW[mid_tr], col)) / max(np.std(mid_logit), 1e-9))
+    print(f"  point size: 1 learned win-score unit = {scale:.1f} Forge points")
+
+    # --- 6. save the weights (numbers only) ---
     os.makedirs(os.path.dirname(args.weights) or ".", exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     with open(args.weights, "w", encoding="utf-8") as f:
@@ -314,8 +394,18 @@ def main() -> None:
                      "active = 1 if it's my turn starting. Pick the stage by Forge's turn number.",
             "snapshot_version": args.version, "ai": args.ai, "trained": stamp,
             "games": info["games"], "train_games": n_train_games, "test_games": n_test_games,
-            "inputs": names, "stages": weights_out,
+            "inputs": names, "scale": scale, "stages": weights_out,
         }, f, indent=1)
+
+    # --- 7. the Brain profile's two lines (read by Forge patch 21's LearnedEvaluator) ---
+    settings = brain_settings(names, scale, weights_out)
+    check_settings(settings, X, turn, names, weights_out, scale)
+    os.makedirs(os.path.dirname(args.settings) or ".", exist_ok=True)
+    with open(args.settings, "w", encoding="utf-8") as f:
+        f.write(f"# AI brain: learned scorekeeper ({stamp}, {info['games']} {args.ai} games, snapshot version {args.version})\n"
+                "# Added to Forge's Hardest profile to make the Brain profile (see the simulate workflow).\n"
+                "LEARNED_EVAL=true\n"
+                f"LEARNED_EVAL_WEIGHTS={settings}\n")
 
     # --- 6. write the report ---
     lines = [f"# Learned scorekeeper (snapshot version {args.version})", "",
@@ -341,7 +431,9 @@ def main() -> None:
             lines.append(f"| {deck} | {n} | **{l:.1%}** | {fo:.1%} |")
         lines.append(f"| **Average** | | **{avg_l:.1%}** | {avg_f:.1%} |")
         lines.append(f"\nLearned was better on {wins} of {len(unseen)} decks.")
-    lines += ["", "## What each board number is worth, in life points", "",
+    lines += ["", f"One learned win-score unit = {scale:.1f} Forge points (so the learned score is about the "
+              "same size as Forge's own score, and the look-ahead's bonuses keep their weight).",
+              "", "## What each board number is worth, in life points", "",
               "How many of your own life points one more of each is worth (compared with the opponent). "
               "Forge = its hand-written formula (approximate, the same at every stage).", "",
               "| One more... | " + " | ".join(f"Learned ({s})" for s in worth) + " | Forge |",
@@ -357,14 +449,13 @@ def main() -> None:
               "- Forge-style formula is rebuilt from counts (Forge scores each real card), so it is approximate.",
               "- 'Learned' values describe what predicted wins in AI-vs-AI games, not what causes them.",
               "- Library, graveyard and exile sizes are left out on purpose (they mostly track game length).",
-              "- Small values can flip sign between stages (e.g. late-game power): numbers that move together "
-              "(creatures, power, toughness) share credit unevenly. Step 3 should not let 'good' numbers "
-              "count below zero.",
+              "- Good numbers (life, cards, lands, creatures, power, toughness, planeswalkers, loyalty, other "
+              "permanents) are never allowed below zero; a value of +0.0 means the fit wanted it negative.",
               "- Values will change as more matchups and version-2 snapshots are added."]
     os.makedirs(os.path.dirname(args.report) or ".", exist_ok=True)
     with open(args.report, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"Saved weights -> {args.weights}\nSaved report  -> {args.report}")
+    print(f"Saved weights  -> {args.weights}\nSaved report   -> {args.report}\nSaved settings -> {args.settings}")
 
 
 if __name__ == "__main__":
