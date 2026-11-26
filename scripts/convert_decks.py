@@ -21,14 +21,26 @@ Example:
 --standard also checks Standard legality using Forge's official format file
 (forge-gui/res/formats/Sanctioned/Standard.txt): every card must be printed
 in a Standard set and must not be banned. Illegal decks stop the run.
+
+Key cards (added 2026-11-25): plans/key_cards.json can list, per meta deck,
+that deck's most important cards in priority order. They are written into the
+.dck file as Forge's "KeyCards=" line. Forge's AI reads it when an OPPONENT
+takes a card from this deck's hand (discard "you choose" effects, and exile
+effects with the "ThoughtKnotSeer" AI logic): it takes the first key card in
+the list that is in the hand. Sideboarded copies (deck__sb__style) use the
+same list. A key card Forge doesn't know stops the run, like a bad deck.
 """
 
 # ---------------------------------------------------------------------------
 # 1. Imports
 # ---------------------------------------------------------------------------
+import json                 # reads plans/key_cards.json
 import sys                  # command-line arguments and exit codes
 import unicodedata          # removes accents: "Kíli" -> "Kili"
 from pathlib import Path    # safe, cross-platform file paths
+
+# The key-card list lives in the public repo next to the opponents' sideboard plans.
+KEY_CARDS_FILE = Path(__file__).resolve().parent.parent / "plans" / "key_cards.json"
 
 
 # ---------------------------------------------------------------------------
@@ -111,10 +123,38 @@ def read_decklist(path: Path) -> tuple[list, list]:
 
 
 # ---------------------------------------------------------------------------
-# 5. Write a Forge .dck file
+# 4b. Read the optional key-card lists (deck name -> card names in priority order)
+#     Names are swapped for Forge's exact spelling, because Forge compares
+#     key cards by exact name. Unknown names are returned so the run can stop.
 # ---------------------------------------------------------------------------
-def write_dck(path: Path, deck_name: str, main: list, side: list) -> None:
-    lines = ["[metadata]", f"Name={deck_name}", "[Main]"]
+def load_key_cards(forge_names: dict[str, str]) -> tuple[dict[str, list], list]:
+    if not KEY_CARDS_FILE.is_file():
+        return {}, []
+    raw = json.loads(KEY_CARDS_FILE.read_text(encoding="utf-8"))
+    lists, unknown = {}, []
+    for deck, names in raw.items():
+        if deck.startswith("_"):                      # "_how_to_read" and other notes
+            continue
+        fixed = []
+        for name in names:
+            forge_name = forge_names.get(simple_key(name))
+            if forge_name is None:
+                unknown.append(f"{deck}: {name}")
+            else:
+                fixed.append(forge_name)
+        lists[deck] = fixed
+    return lists, unknown
+
+
+# ---------------------------------------------------------------------------
+# 5. Write a Forge .dck file
+#    key_cards (optional) becomes Forge's "KeyCards=" metadata line, joined with ";".
+# ---------------------------------------------------------------------------
+def write_dck(path: Path, deck_name: str, main: list, side: list, key_cards: list | None = None) -> None:
+    lines = ["[metadata]", f"Name={deck_name}"]
+    if key_cards:
+        lines.append("KeyCards=" + ";".join(key_cards))
+    lines.append("[Main]")
     lines += [f"{n} {card}" for n, card in main]
     lines += ["[Sideboard]"]
     lines += [f"{n} {card}" for n, card in side]
@@ -146,6 +186,11 @@ def main() -> None:
         print(f"Standard: {len(legal):,} legal cards, {len(banned)} banned")
 
     problems = 0
+    key_cards, unknown_keys = load_key_cards(forge_names)
+    if unknown_keys:
+        print(f"  KEY CARDS Forge doesn't know (fix {KEY_CARDS_FILE.name}): {', '.join(unknown_keys)}")
+        problems += 1
+
     for deck_file in sorted(decks_dir.glob("*.txt")):
         main_list, side_list = read_decklist(deck_file)
 
@@ -180,8 +225,10 @@ def main() -> None:
             problems += 1
 
         deck_name = deck_file.stem                    # file name without ".txt"
+        base_name = deck_name.split("__sb__")[0]      # sideboarded copies share the deck's list
         if not missing and not illegal:
-            write_dck(out_dir / f"{deck_name}.dck", deck_name, fixed_main, fixed_side)
+            write_dck(out_dir / f"{deck_name}.dck", deck_name, fixed_main, fixed_side,
+                      key_cards.get(base_name))
         print(f"  {deck_name:<25} {main_count:>3} cards  {status}")
 
     # A non-zero exit code makes GitHub Actions stop instead of using bad decks

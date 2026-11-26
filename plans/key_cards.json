@@ -1,0 +1,21 @@
+{
+  "_how_to_read": "Per meta deck: its most important cards, most important first. Written into the deck's Forge file as KeyCards=. When an opponent takes a card from this deck's hand, Forge's AI takes the first card on this list that is in the hand. Listing every nonland card (main and sideboard) means the AI always knows what to take next. Added 2026-11-25.",
+  "mono_green_landfall": [
+    "Mossborn Hydra",
+    "Icetill Explorer",
+    "Mightform Harmonizer",
+    "Sapling Nursery",
+    "Earthbender Ascension",
+    "Keen-Eyed Curator",
+    "Hard-Hitting Question",
+    "Carnivorous Cultivator",
+    "Surrak, Elusive Hunter",
+    "Sandman, Shifting Scoundrel",
+    "Mole Man, Moloid Master",
+    "Warg Tactics",
+    "Pick Your Poison",
+    "Torpor Orb",
+    "Sazh's Chocobo",
+    "Llanowar Elves"
+  ]
+}
