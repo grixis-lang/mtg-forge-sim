@@ -16,6 +16,10 @@ What it flags (each one found in our testing so far):
   - modal / spree cards: usually fine, listed so the reports get checked
   - counterspells: depend on the AI profile (test with a control AI profile)
   - Forge's own "AI can't use this well" flags (AI:RemoveDeck)
+  - a trigger or spell that takes from an opponent's hand but has no IsCurse$: before
+      casting the creature, the AI tries to target ITSELF, fails and doesn't cast it
+  - "look at their hand and choose a card" with no AILogic: the AI takes their WORST card
+  - "sacrifice a creature or pay {X}" (AlternateAdditionalCost): the AI pays mana first
 Cards that already have a fix in the overrides folder are marked as fixed.
 (Examples of fixed cards are kept in the private repo, not here, because
 they show which cards we test.)
@@ -94,6 +98,22 @@ def problems(text: str) -> list[str]:
         found.append("counterspell: test with a control AI profile")
     if re.search(r"SP\$ Charm", front):
         found.append("modal/spree: usually fine, check the reports that every mode gets used")
+    # Hidden-zone effects that target an opponent (e.g. "look at target opponent's hand, exile a card")
+    for ln in front.splitlines():
+        hand_effect = re.search(r"\b(ChangeZone|ChangeZoneAll)\b", ln) and "Origin$ Hand" in ln
+        hits_opponent = re.search(r"ValidTgts\$ (Opponent|Player)", ln)
+        if hand_effect and hits_opponent and "IsCurse$" not in ln:
+            found.append("takes from an opponent's hand without IsCurse$: the AI may target itself and not "
+                         "cast it -> add IsCurse$ True")
+        if hand_effect and "Chooser$ You" in ln and "AILogic$" not in ln:
+            found.append("we choose a card from their hand: the AI takes their WORST card -> add "
+                         "AILogic$ ThoughtKnotSeer (+ a key-card list for the opponent)")
+        if re.search(r"\bDiscard\b", ln) and "Mode$ RevealYouChoose" in ln:
+            found.append("'you choose, they discard': uses the opponent's key-card list, else their "
+                         "best-looking card -> check the opponent has KeyCards")
+    if "K:AlternateAdditionalCost" in front:
+        found.append("'sacrifice or pay' extra cost: the AI tries paying mana first -> write two A:SP$ "
+                     "lines (pay version AIActivateLast) + AIPreference:SacCost")
     if re.search(r"^AI:RemoveDeck:All", text, re.M):
         found.append("Forge says the AI can't use this card (RemoveDeck:All) -> needs a fix or avoid it")
     elif re.search(r"^AI:RemoveDeck:Random", text, re.M):
