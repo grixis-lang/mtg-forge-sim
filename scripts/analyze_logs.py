@@ -23,6 +23,9 @@ Reads Forge's full game log (saved by run_matchup.py --log-out) and reports:
   7. Running out of gas: how many spells we cast per turn, early vs late
   8. Mana, play/draw and mulligans
   9. Biggest threats and how we lose
+ 10. Combat report (added 2026-11-25): how often each side's attackers get
+     blocked, round by round; which creatures block most; and what happens
+     when an attack is blocked (attacker dies, blocker dies, both, neither)
 
 How to run (Python 3.10+, no extra packages needed):
     python scripts/analyze_logs.py <game-log> <our deck name> <output.md> [<cardsfolder>]
@@ -190,6 +193,8 @@ def new_game() -> dict:
         "our_names": set(), "opp_names": set(),  # card names each side cast
         "opening": [],            # our kept opening hand (card names), if the log has it
         "our_land_names": set(),  # names of lands we played (to tell lands apart in the opening hand)
+        "attacks": [],            # (forge turn, attacking side, [(name, id)]) one entry per attack line
+        "blocks": [],             # (forge turn, blocking side, [(blocker name, id)], [(attacker name, id)])
     }
 
 
@@ -333,18 +338,24 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
 
         m = ATTACK.match(line)
         if m:
-            for nm, cid in split_cards(m.group(2)):
+            attackers = split_cards(m.group(2))
+            for nm, cid in attackers:
                 g["owner"][cid] = side(m.group(1))
                 seen_in_play(side(m.group(1)), nm, cid)
+            # remember the attack for the combat report
+            g["attacks"].append((g["forge_turn"], side(m.group(1)), attackers))
             continue
 
         m = BLOCK.match(line)
         if m:
-            for nm, cid in split_cards(m.group(2)):
+            blockers, blocked = split_cards(m.group(2)), split_cards(m.group(3))
+            for nm, cid in blockers:
                 g["owner"][cid] = side(m.group(1))
                 seen_in_play(side(m.group(1)), nm, cid)
-            for _, cid in split_cards(m.group(3)):    # the blocked attacker belongs to the other side
+            for _, cid in blocked:    # the blocked attacker belongs to the other side
                 g["owner"].setdefault(cid, "opp" if side(m.group(1)) == "us" else "us")
+            # remember the block for the combat report
+            g["blocks"].append((g["forge_turn"], side(m.group(1)), blockers, blocked))
             continue
 
         m = DIES.match(line)
@@ -552,6 +563,104 @@ def cast_by_turn_report(games: list[dict], last_turn: int = 6) -> list[str]:
         out.append(f"| {card} | " + " | ".join(str(cnt[t]) if cnt[t] else "" for t in range(1, last_turn + 1)) + " |")
     out.append("| **Nothing cast** | " + " | ".join(
         f"{reached[t] - did_something[t]} of {reached[t]}" for t in range(1, last_turn + 1)) + " |")
+    return out
+
+
+def combat_stats(games: list[dict], attacker_side: str):
+    """Attacks by one side ("us" or "opp") and how the other side blocked them.
+
+    Returns (per_round, blockers, attackers, outcomes):
+      per_round[key][round] = [attacking creatures, of which blocked], key = "all", "win" or "loss"
+      blockers[name]  = [blocks made, the blocker died, the attacker it blocked died]
+      attackers[name] = [attacks, times blocked, died when blocked]
+      outcomes        = Counter of what happened in each blocked attack
+    A creature "died in the block" only if it died that turn AND took damage from its
+    combat partner, so attackers sacrificed at end of turn (mobilize tokens) don't count.
+    """
+    blocker_side = "opp" if attacker_side == "us" else "us"
+    per_round = {k: defaultdict(lambda: [0, 0]) for k in ("all", "win", "loss")}
+    blockers = defaultdict(lambda: [0, 0, 0])
+    attackers = defaultdict(lambda: [0, 0, 0])
+    outcomes = Counter()
+    for g in games:
+        result = g["result"] if g["result"] in ("win", "loss") else None
+        died = {(t, cid) for t, _, cid in g["deaths"]}
+        damaged = {(t, src, tgt) for t, _, src, tgt in g["card_damage"]}   # (turn, source id, target id)
+        blocked_by = defaultdict(list)            # (turn, attacker id) -> [(blocker name, id)]
+        for t, bside, blks, atts in g["blocks"]:
+            if bside == blocker_side:
+                for _, aid in atts:
+                    blocked_by[(t, aid)].extend(blks)
+        counted = set()                           # an attacker counts once per turn
+        for t, aside, atts in g["attacks"]:
+            if aside != attacker_side:
+                continue
+            rnd = (t + 1) // 2
+            for name, aid in atts:
+                if (t, aid) in counted:
+                    continue
+                counted.add((t, aid))
+                blocked = (t, aid) in blocked_by
+                for key in ("all", result):
+                    if key:
+                        per_round[key][rnd][0] += 1
+                        per_round[key][rnd][1] += blocked
+                attackers[name][0] += 1
+                if not blocked:
+                    continue
+                blks = blocked_by[(t, aid)]
+                attacker_died = (t, aid) in died and any((t, bid, aid) in damaged for _, bid in blks)
+                dead_blockers = {bid for _, bid in blks if (t, bid) in died and (t, aid, bid) in damaged}
+                attackers[name][1] += 1
+                attackers[name][2] += attacker_died
+                for bname, bid in blks:
+                    blockers[bname][0] += 1
+                    blockers[bname][1] += bid in dead_blockers
+                    blockers[bname][2] += attacker_died
+                if attacker_died and dead_blockers:
+                    outcomes["both died (trade)"] += 1
+                elif attacker_died:
+                    outcomes["only the attacker died"] += 1
+                elif dead_blockers:
+                    outcomes["only the blocker died"] += 1
+                else:
+                    outcomes["neither died"] += 1
+    return per_round, blockers, attackers, outcomes
+
+
+def combat_report(games: list[dict]) -> list[str]:
+    """Section: how often attacks get blocked, by whom, and what happens."""
+    out = ["", "## Combat report (attacks and blocks)", "",
+           "Each attacking creature counts once per turn. \"Died in the block\" = it died that turn and "
+           "took damage from the creature it fought (so mobilize tokens sacrificed at end of turn don't count).", ""]
+    rounds = list(range(2, 10))
+    for attacker_side, title, blocker_word in (("us", "Our attacks", "Their"), ("opp", "Their attacks", "Our")):
+        per_round, blockers, attackers, outcomes = combat_stats(games, attacker_side)
+        total_att = sum(per_round["all"][r][0] for r in per_round["all"])
+        total_blk = sum(per_round["all"][r][1] for r in per_round["all"])
+        out += [f"### {title}", "",
+                f"{total_att} attacking creatures, {total_blk} blocked ({pct(total_blk, total_att)}).", "",
+                "| Round | Attackers | Blocked | Blocked % | Blocked % in our wins | Blocked % in our losses |",
+                "|---|---:|---:|---:|---:|---:|"]
+        for r in rounds:
+            a, b = per_round["all"][r]
+            if not a:
+                continue
+            w, l = per_round["win"][r], per_round["loss"][r]
+            out.append(f"| {r} | {a} | {b} | {pct(b, a)} | {pct(w[1], w[0])} | {pct(l[1], l[0])} |")
+        if outcomes:
+            n_blocked = sum(outcomes.values())
+            out += ["", "What happened when an attack was blocked: " + ", ".join(
+                f"{k} {v} ({pct(v, n_blocked)})" for k, v in outcomes.most_common()) + "."]
+        out += ["", f"| {blocker_word} blocker | Blocks | Blocker died in the block | Attacker died in the block |",
+                "|---|---:|---:|---:|"]
+        for name, (n_b, b_died, a_died) in sorted(blockers.items(), key=lambda kv: -kv[1][0])[:8]:
+            out.append(f"| {name} | {n_b} | {b_died} ({pct(b_died, n_b)}) | {a_died} ({pct(a_died, n_b)}) |")
+        out += ["", f"| {'Our' if attacker_side == 'us' else 'Their'} attacker | Attacks | Blocked | Blocked % | Died when blocked |",
+                "|---|---:|---:|---:|---:|"]
+        for name, (n_a, n_bl, d) in sorted(attackers.items(), key=lambda kv: -kv[1][0])[:10]:
+            out.append(f"| {name} | {n_a} | {n_bl} | {pct(n_bl, n_a)} | {d} |")
+        out.append("")
     return out
 
 
@@ -880,6 +989,9 @@ def report(games: list[dict], ours: str, opponent: str,
                      for r in rounds]
             biggest = max(d for r in hits[src] for d in hits[src][r])
             out.append(f"| {src} | " + " | ".join(cells) + f" | {biggest} |")
+
+    # --- Combat: attacks and blocks -----------------------------------------
+    out += combat_report(games)
 
     # --- Running out of gas ------------------------------------------------
     out += ["", "## Spells cast per turn (running out of gas?)", "",
