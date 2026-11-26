@@ -60,6 +60,7 @@ the play). This report turns that into ROUNDS: round 4 = each player's 4th turn.
 # 1. Imports
 # ---------------------------------------------------------------------------
 import re
+import statistics
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -81,6 +82,10 @@ LIFE = re.compile(r"^Life: (?:Life: )?(.+?) (-?\d+) > (-?\d+)$")
 ATTACK = re.compile(r"^(?:Combat: )?(.+?) assigned (.+) to attack (.+?)\.?$")
 BLOCK = re.compile(r"^(?:Combat: )?(.+?) assigned (.+) to block (.+?)\.?$")
 DIES = re.compile(r"^Zone Change: (.+?) \((\d+)\) was put into (\w+) from Battlefield")
+# Patch 20 (20_log_creatures): one line per creature at the start of every turn, with its size and counters:
+# "Turn: Creature turn=7 power=5 toughness=5 p1p1=0 m1m1=2 id=123 card=Some Creature player=Ai(1)-deck"
+CREATURE = re.compile(r"^Turn: Creature turn=(\d+) power=(-?\d+) toughness=(-?\d+) p1p1=(\d+) m1m1=(\d+) "
+                      r"id=(\d+) card=(.+?) player=(.+)$")
 OUTCOME_TURN = re.compile(r"^Game Outcome: Turn (\d+)")
 OUTCOME_LOST = re.compile(r"^Game Outcome: (.+?) has lost because (.+)$")
 RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has won!")
@@ -197,6 +202,7 @@ def new_game() -> dict:
         "our_land_names": set(),  # names of lands we played (to tell lands apart in the opening hand)
         "attacks": [],            # (forge turn, attacking side, [(name, id)]) one entry per attack line
         "blocks": [],             # (forge turn, blocking side, [(blocker name, id)], [(attacker name, id)])
+        "creature_sizes": [],     # patch 20: (forge turn, side, id, name, power, toughness, p1p1, m1m1)
     }
 
 
@@ -263,6 +269,12 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["on_play"] = is_ours(player)         # who took turn 1
             if is_ours(player):
                 g["our_turn_index"] += 1                # our 1st, 2nd, 3rd turn...
+            continue
+
+        m = CREATURE.match(line)
+        if m:
+            g["creature_sizes"].append((int(m.group(1)), side(m.group(8)), m.group(6), m.group(7).strip(),
+                                        int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))))
             continue
 
         m = OPENING_HAND.match(line)
@@ -634,6 +646,99 @@ def combat_stats(games: list[dict], attacker_side: str):
     return per_round, blockers, attackers, outcomes
 
 
+def creature_size_report(games: list[dict]) -> list[str]:
+    """Section: how big creatures with +1/+1 or -1/-1 counters are, round by round (needs patch 20).
+
+    Part 1 - our creatures that had -1/-1 counters (for example a creature that enters with -1/-1
+    counters and loses one each time something happens): their size at the start of each round,
+    and how often and how fast they lose every counter ("full size").
+    Part 2 - creatures with +1/+1 counters on either side: how big they get.
+    A "round" is one turn for each player, as in the other reports; the size is read at the start
+    of each round (the start of turn 1, 3, 5... of the game).
+    """
+    out = ["", "## Creature size report (counters)", ""]
+    if not any(g["creature_sizes"] for g in games):
+        return out + ["No creature size lines in these logs (they need Forge patch 20_log_creatures).", ""]
+    out += ["Read at the start of each round. \"Full size\" = every -1/-1 counter is gone.", ""]
+
+    # --- 1. Follow each creature (one game + one card id) through the game -------------------------
+    # tracks[(game index, side, id)] = {"name": ..., "seen": [(round, power, toughness, p1p1, m1m1)]}
+    tracks = {}
+    for gi, g in enumerate(games):
+        for turn, who, cid, name, pw, tg, p1, m1 in g["creature_sizes"]:
+            if turn % 2 == 0:                          # keep one snapshot per round: its first turn
+                continue
+            rnd = (turn + 1) // 2
+            tr = tracks.setdefault((gi, who, cid), {"name": name, "won": score(g), "seen": []})
+            tr["seen"].append((rnd, pw, tg, p1, m1))
+
+    rounds = list(range(2, 9))
+
+    # --- 2. Our shrinking creatures (they had -1/-1 counters at some point) --------------------------
+    shrink = defaultdict(list)                         # card name -> list of tracks
+    for (gi, who, cid), tr in tracks.items():
+        if who == "us" and any(s[4] > 0 for s in tr["seen"]):
+            shrink[tr["name"]].append(tr)
+    if shrink:
+        out += ["### Our creatures with -1/-1 counters (do they grow to full size?)", "",
+                "| Card | Copies seen | " + " | ".join(f"Round {r}" for r in rounds)
+                + " | Reached full size | Rounds to full size | Win % if full size / not |",
+                "|---|---:|" + "---|" * len(rounds) + "---:|---:|---|"]
+        for name, trs in sorted(shrink.items(), key=lambda kv: -len(kv[1])):
+            cells = []
+            for r in rounds:
+                sizes = [(s[1], s[2]) for tr in trs for s in tr["seen"] if s[0] == r]
+                cells.append(f"{statistics.mean(p for p, _ in sizes):.1f}/{statistics.mean(t for _, t in sizes):.1f} ({len(sizes)})"
+                             if sizes else "-")
+            full, to_full, won_full, won_not = 0, [], [], []
+            for tr in trs:
+                first = tr["seen"][0][0]
+                done = next((s[0] for s in tr["seen"] if s[4] == 0), None)
+                if done is not None:
+                    full += 1; to_full.append(done - first); won_full.append(tr["won"])
+                else:
+                    won_not.append(tr["won"])
+            speed = f"{statistics.mean(to_full):.1f}" if to_full else "-"
+            wf = pct(sum(won_full), len(won_full)) if won_full else "-"
+            wn = pct(sum(won_not), len(won_not)) if won_not else "-"
+            out.append(f"| {name} | {len(trs)} | " + " | ".join(cells)
+                       + f" | {full} ({pct(full, len(trs))}) | {speed} | {wf} / {wn} |")
+        out += ["", "Each cell is the average power/toughness of the copies on the battlefield at the start of "
+                "that round (how many copies in brackets). Rounds to full size counts from the first round the "
+                "copy was seen.", ""]
+        # By which round were copies at full size? (share of all copies seen)
+        out += ["| Card | Full size by round 3 | by round 4 | by round 5 | by round 6 | by round 7 |",
+                "|---|---:|---:|---:|---:|---:|"]
+        for name, trs in sorted(shrink.items(), key=lambda kv: -len(kv[1])):
+            cells = []
+            for r in range(3, 8):
+                n = sum(1 for tr in trs if any(s[0] <= r and s[4] == 0 for s in tr["seen"]))
+                cells.append(pct(n, len(trs)))
+            out.append(f"| {name} | " + " | ".join(cells) + " |")
+        out.append("")
+
+    # --- 3. Creatures with +1/+1 counters (both sides) ------------------------------------------------
+    grow = defaultdict(list)                           # (side, card name) -> list of tracks
+    for (gi, who, cid), tr in tracks.items():
+        if any(s[3] > 0 for s in tr["seen"]):
+            grow[(who, tr["name"])].append(tr)
+    if grow:
+        out += ["### Creatures with +1/+1 counters (how big do they get?)", "",
+                "| Side | Card | Copies seen | " + " | ".join(f"Round {r}" for r in rounds)
+                + " | Biggest (median) | Biggest (max) |",
+                "|---|---|---:|" + "---|" * len(rounds) + "---:|---:|"]
+        for (who, name), trs in sorted(grow.items(), key=lambda kv: -len(kv[1]))[:10]:
+            cells = []
+            for r in rounds:
+                pw = [s[1] for tr in trs for s in tr["seen"] if s[0] == r]
+                cells.append(f"{statistics.mean(pw):.1f} ({len(pw)})" if pw else "-")
+            biggest = [max(s[1] for s in tr["seen"]) for tr in trs]
+            out.append(f"| {'ours' if who == 'us' else 'theirs'} | {name} | {len(trs)} | " + " | ".join(cells)
+                       + f" | {statistics.median(biggest):.0f} | {max(biggest)} |")
+        out += ["", "Each cell is the average power at the start of that round (how many copies in brackets).", ""]
+    return out
+
+
 def combat_report(games: list[dict]) -> list[str]:
     """Section: how often attacks get blocked, by whom, and what happens."""
     out = ["", "## Combat report (attacks and blocks)", "",
@@ -998,6 +1103,7 @@ def report(games: list[dict], ours: str, opponent: str,
 
     # --- Combat: attacks and blocks -----------------------------------------
     out += combat_report(games)
+    out += creature_size_report(games)
 
     # --- Running out of gas ------------------------------------------------
     out += ["", "## Spells cast per turn (running out of gas?)", "",

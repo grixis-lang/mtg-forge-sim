@@ -1,0 +1,88 @@
+diff --git a/forge-game/src/main/java/forge/game/CreatureLog.java b/forge-game/src/main/java/forge/game/CreatureLog.java
+new file mode 100644
+index 0000000..608655c
+--- /dev/null
++++ b/forge-game/src/main/java/forge/game/CreatureLog.java
+@@ -0,0 +1,68 @@
++package forge.game;
++
++import forge.game.card.Card;
++import forge.game.card.CounterEnumType;
++import forge.game.event.GameEventAddLog;
++import forge.game.player.Player;
++
++/**
++ * mtg-forge-sim: at the start of every turn, logs one line per creature on the battlefield with its
++ * size and its +1/+1 and -1/-1 counters.
++ * <p>
++ * Why: the game log shows when a creature's ability triggers, but not how big the creature is. With
++ * these lines our report can show, turn by turn, how fast a creature that enters with -1/-1 counters
++ * grows to full size, or how big an opponent's +1/+1-counter creature gets.
++ * <p>
++ * LOG ONLY: nothing in this class changes how a game is played. It only reads the game state.
++ * <p>
++ * WHEN: right after the "Position" lines of patch 19 (start of every turn, before untap).
++ * <p>
++ * Example line, as it appears in the game log (one per creature, every turn):
++ * <pre>
++ * Turn: Creature turn=7 power=5 toughness=5 p1p1=0 m1m1=2 id=123 card=Some Creature player=Ai(1)-our_deck
++ * </pre>
++ * The card name and the player's name come last, because both can contain spaces.
++ * Read by mtg-forge-sim's scripts/analyze_logs.py ("Creature size report").
++ */
++public final class CreatureLog {
++
++    /** Utility class: only static methods, never created. */
++    private CreatureLog() {
++    }
++
++    /**
++     * Logs one line for every creature on the battlefield, for every player still in the game.
++     * Called by PositionLog.logTurnStart, which PhaseHandler calls right after a new turn begins.
++     *
++     * @param game the game being played
++     */
++    public static void logTurnStart(final Game game) {
++        final int turn = game.getPhaseHandler().getTurn();
++        for (final Player player : game.getPlayers()) {
++            for (final Card creature : player.getCreaturesInPlay()) {
++                game.fireEvent(new GameEventAddLog(GameLogEntryType.TURN, describe(turn, creature, player)));
++            }
++        }
++    }
++
++    /**
++     * Builds the text of one creature's line.
++     *
++     * @param turn     the game turn that is starting
++     * @param creature the creature on the battlefield
++     * @param player   its controller
++     * @return the log text (without the "Turn: " prefix, which the game log adds)
++     */
++    private static String describe(final int turn, final Card creature, final Player player) {
++        final StringBuilder sb = new StringBuilder("Creature");
++        sb.append(" turn=").append(turn);
++        sb.append(" power=").append(creature.getNetPower());
++        sb.append(" toughness=").append(creature.getNetToughness());
++        sb.append(" p1p1=").append(creature.getCounters(CounterEnumType.P1P1));
++        sb.append(" m1m1=").append(creature.getCounters(CounterEnumType.M1M1));
++        sb.append(" id=").append(creature.getId());
++        sb.append(" card=").append(creature.getName());      // a name can contain spaces...
++        sb.append(" player=").append(player.getName());      // ...so these two come last
++        return sb.toString();
++    }
++}
+diff --git a/forge-game/src/main/java/forge/game/PositionLog.java b/forge-game/src/main/java/forge/game/PositionLog.java
+index 19cf120..7000c18 100644
+--- a/forge-game/src/main/java/forge/game/PositionLog.java
++++ b/forge-game/src/main/java/forge/game/PositionLog.java
+@@ -77,6 +77,9 @@ public final class PositionLog {
+             final boolean isActive = player.equals(active);
+             game.fireEvent(new GameEventAddLog(GameLogEntryType.TURN, describe(turn, player, isActive)));
+         }
++
++        // 3. mtg-forge-sim patch 20: one line per creature with its size and counters (log only)
++        CreatureLog.logTurnStart(game);
+     }
+ 
+     /**
