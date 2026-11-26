@@ -73,7 +73,7 @@ index 0000000..608655c
 +    }
 +}
 diff --git a/forge-game/src/main/java/forge/game/PositionLog.java b/forge-game/src/main/java/forge/game/PositionLog.java
-index 19cf120..7000c18 100644
+index 19cf120..d83d8a6 100644
 --- a/forge-game/src/main/java/forge/game/PositionLog.java
 +++ b/forge-game/src/main/java/forge/game/PositionLog.java
 @@ -77,6 +77,9 @@ public final class PositionLog {
@@ -81,7 +81,7 @@ index 19cf120..7000c18 100644
              game.fireEvent(new GameEventAddLog(GameLogEntryType.TURN, describe(turn, player, isActive)));
          }
 +
-+        // 3. mtg-forge-sim patch 20: one line per creature with its size and counters (log only)
++        // 3. mtg-forge-sim patch 22: one line per creature with its size and counters (log only)
 +        CreatureLog.logTurnStart(game);
      }
  

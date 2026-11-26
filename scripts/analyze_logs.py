@@ -82,7 +82,7 @@ LIFE = re.compile(r"^Life: (?:Life: )?(.+?) (-?\d+) > (-?\d+)$")
 ATTACK = re.compile(r"^(?:Combat: )?(.+?) assigned (.+) to attack (.+?)\.?$")
 BLOCK = re.compile(r"^(?:Combat: )?(.+?) assigned (.+) to block (.+?)\.?$")
 DIES = re.compile(r"^Zone Change: (.+?) \((\d+)\) was put into (\w+) from Battlefield")
-# Patch 20 (20_log_creatures): one line per creature at the start of every turn, with its size and counters:
+# Patch 22 (22_log_creatures): one line per creature at the start of every turn, with its size and counters:
 # "Turn: Creature turn=7 power=5 toughness=5 p1p1=0 m1m1=2 id=123 card=Some Creature player=Ai(1)-deck"
 CREATURE = re.compile(r"^Turn: Creature turn=(\d+) power=(-?\d+) toughness=(-?\d+) p1p1=(\d+) m1m1=(\d+) "
                       r"id=(\d+) card=(.+?) player=(.+)$")
@@ -202,7 +202,7 @@ def new_game() -> dict:
         "our_land_names": set(),  # names of lands we played (to tell lands apart in the opening hand)
         "attacks": [],            # (forge turn, attacking side, [(name, id)]) one entry per attack line
         "blocks": [],             # (forge turn, blocking side, [(blocker name, id)], [(attacker name, id)])
-        "creature_sizes": [],     # patch 20: (forge turn, side, id, name, power, toughness, p1p1, m1m1)
+        "creature_sizes": [],     # patch 22: (forge turn, side, id, name, power, toughness, p1p1, m1m1)
     }
 
 
@@ -647,7 +647,7 @@ def combat_stats(games: list[dict], attacker_side: str):
 
 
 def creature_size_report(games: list[dict]) -> list[str]:
-    """Section: how big creatures with +1/+1 or -1/-1 counters are, round by round (needs patch 20).
+    """Section: how big creatures with +1/+1 or -1/-1 counters are, round by round (needs patch 22).
 
     Part 1 - our creatures that had -1/-1 counters (for example a creature that enters with -1/-1
     counters and loses one each time something happens): their size at the start of each round,
@@ -658,7 +658,7 @@ def creature_size_report(games: list[dict]) -> list[str]:
     """
     out = ["", "## Creature size report (counters)", ""]
     if not any(g["creature_sizes"] for g in games):
-        return out + ["No creature size lines in these logs (they need Forge patch 20_log_creatures).", ""]
+        return out + ["No creature size lines in these logs (they need Forge patch 22_log_creatures).", ""]
     out += ["Read at the start of each round. \"Full size\" = every -1/-1 counter is gone.", ""]
 
     # --- 1. Follow each creature (one game + one card id) through the game -------------------------
