@@ -87,6 +87,8 @@ RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has wo
 RESULT_DRAW = re.compile(r"Game Result: Game (\d+) ended in a Draw")
 CARD_WITH_ID = re.compile(r"([^,\[\]]+?) \((\d+)\)")   # "Mossborn Hydra (88)" -> name, id
 CARD_ID = re.compile(r"\s*\(\d+\)$")                     # removes " (88)" from "Mossborn Hydra (88)"
+# One card in a combat list: name (may contain commas), its id, then ", ", " and " or the end
+COMBAT_CARD = re.compile(r"(?:and\s+)?([^()]+?) \((\d+)\)(?:,\s*|\s+and\s+|\s*$)")
 
 STARTING_LIFE = 20
 
@@ -211,6 +213,10 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
 
     def split_cards(text: str) -> list[tuple[str, str]]:
         return [(n.strip(), i) for n, i in CARD_WITH_ID.findall(text)]
+
+    def split_combat(text: str) -> list[tuple[str, str]]:
+        """Cards in an attack/block line, keeping names that contain commas."""
+        return [(n.strip(), i) for n, i in COMBAT_CARD.findall(text.strip().rstrip('.'))]
 
     def printed_power(name: str) -> int:
         kind, power = kinds.get(name, ("creature", TOKEN_POWER))
@@ -343,7 +349,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["owner"][cid] = side(m.group(1))
                 seen_in_play(side(m.group(1)), nm, cid)
             # remember the attack for the combat report
-            g["attacks"].append((g["forge_turn"], side(m.group(1)), attackers))
+            g["attacks"].append((g["forge_turn"], side(m.group(1)), split_combat(m.group(2))))
             continue
 
         m = BLOCK.match(line)
@@ -355,7 +361,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
             for _, cid in blocked:    # the blocked attacker belongs to the other side
                 g["owner"].setdefault(cid, "opp" if side(m.group(1)) == "us" else "us")
             # remember the block for the combat report
-            g["blocks"].append((g["forge_turn"], side(m.group(1)), blockers, blocked))
+            g["blocks"].append((g["forge_turn"], side(m.group(1)), split_combat(m.group(2)), split_combat(m.group(3))))
             continue
 
         m = DIES.match(line)
