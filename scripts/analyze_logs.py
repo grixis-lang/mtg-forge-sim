@@ -815,6 +815,42 @@ def report(games: list[dict], ours: str, opponent: str,
     for _, card, cnt, wc, wnc, ft in sorted(rows, reverse=True):
         out.append(f"| {card} | {cnt} | {wc} | {wnc} | {ft:.1f} |")
 
+    # --- Their cards: which of the opponent's cards hurt us? -------------------
+    # Same idea as the table above, seen from the other side: OUR win rate in games where the
+    # opponent cast the card, next to games where they didn't. A card far below our overall rate
+    # is one that beats us. Their sideboard cards are only cast in games 2-3, so compare those with
+    # our games 2-3 result (in the results file), not with game 1.
+    out += ["", "## Their card performance (which of their cards beat us?)", "",
+            "Our win rate in games where the opponent cast the card at least once, next to games where "
+            "they didn't. Far below our overall rate = a card that beats us. Cards they only bring in "
+            "after game 1 are cast in games 2-3 only.", "",
+            "| Their card | Games cast | Our win % when they cast it | Our win % when they didn't | Avg round first cast |",
+            "|---|---:|---:|---:|---:|"]
+    opp_cast_in = defaultdict(list)
+    opp_first = defaultdict(list)
+    for g in games:
+        seen = {}
+        for turn in sorted(g["casts_by_turn"]):
+            for who, card in g["casts_by_turn"][turn]:
+                if who == "opp":
+                    seen.setdefault(card, (turn + 1) // 2)
+        for card, rnd in seen.items():
+            opp_cast_in[card].append(g)
+            opp_first[card].append(rnd)
+    opp_rows = []
+    for card, gs in opp_cast_in.items():
+        if len(gs) < 5:                                   # too few games to say anything
+            continue
+        w = sum(score(g) for g in gs)
+        not_cast = [g for g in games if g not in gs]
+        wn = sum(score(g) for g in not_cast)
+        opp_rows.append((w / len(gs), card, len(gs), pct(w, len(gs)), pct(wn, len(not_cast)),
+                         sum(opp_first[card]) / len(opp_first[card])))
+    for _, card, cnt, wc, wnc, ft in sorted(opp_rows):    # worst for us first
+        out.append(f"| {card} | {cnt} | {wc} | {wnc} | {ft:.1f} |")
+    if not opp_rows:
+        out.append("| (none) | | | | |")
+
     # --- Game length -------------------------------------------------------
     out += ["", "## Game length", "",
             "| Ended by round | Wins | Losses |", "|---|---:|---:|"]
