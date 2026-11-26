@@ -39,5 +39,18 @@
       "Jace's Machinations": 3,
       "Consult the Star Charts": 1
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Flash fliers that block early and stop enter triggers, a second Rest in Peace, a second sweeper. Cuts slow card draw.",
+    "in": {
+      "Doorkeeper Thrull": 4,
+      "Rest in Peace": 1,
+      "Ultima": 1
+    },
+    "out": {
+      "Mathemagics": 1,
+      "Jace's Machinations": 3,
+      "Consult the Star Charts": 2
+    }
   }
 }

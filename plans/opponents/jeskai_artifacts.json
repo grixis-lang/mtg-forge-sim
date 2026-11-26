@@ -36,5 +36,22 @@
       "Clay-Fired Bricks": 1,
       "Boomerang Basics": 2
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Rest in Peace, Torpor Orb, Authority of the Consuls and more sweepers. Cuts the slower artifacts.",
+    "in": {
+      "Rest in Peace": 2,
+      "Torpor Orb": 2,
+      "Authority of the Consuls": 2,
+      "Day of Judgment": 2
+    },
+    "out": {
+      "Braided Net": 1,
+      "Clay-Fired Bricks": 1,
+      "Boomerang Basics": 2,
+      "The Irencrag": 1,
+      "The Fire Crystal": 1,
+      "Cryogen Relic": 2
+    }
   }
 }

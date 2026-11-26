@@ -1,17 +1,56 @@
 {
   "control": {
     "_why": "Leatherhead starts with hexproof and breaks artifacts/enchantments; Surrak can't be countered; Clarion Conqueror shuts off planeswalker and artifact abilities; Arachne taxes their spells. Cuts fight/removal with few targets.",
-    "in": {"Leatherhead, Swamp Stalker": 2, "Surrak, Elusive Hunter": 1, "Clarion Conqueror": 2, "Arachne, Psionic Weaver": 1},
-    "out": {"Meltstrider's Resolve": 2, "Seam Rip": 2, "Guiding Hydra": 1, "Bejeweled Warg": 1}
+    "in": {
+      "Leatherhead, Swamp Stalker": 2,
+      "Surrak, Elusive Hunter": 1,
+      "Clarion Conqueror": 2,
+      "Arachne, Psionic Weaver": 1
+    },
+    "out": {
+      "Meltstrider's Resolve": 2,
+      "Seam Rip": 2,
+      "Guiding Hydra": 1,
+      "Bejeweled Warg": 1
+    }
   },
   "midrange": {
     "_why": "Bigger threats and more removal for a creature fight; cuts the weakest early drops.",
-    "in": {"Leatherhead, Swamp Stalker": 2, "Sheltered by Ghosts": 2, "Erode": 1},
-    "out": {"Gene Pollinator": 2, "Pawpatch Recruit": 2, "Guiding Hydra": 1}
+    "in": {
+      "Leatherhead, Swamp Stalker": 2,
+      "Sheltered by Ghosts": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Gene Pollinator": 2,
+      "Pawpatch Recruit": 2,
+      "Guiding Hydra": 1
+    }
   },
   "aggro": {
     "_why": "Doorkeeper Thrull is a flash flier that stops enter-the-battlefield value; Erode kills a threat. Cuts the mana creature and weakest early drops.",
-    "in": {"Doorkeeper Thrull": 4, "Erode": 1},
-    "out": {"Gene Pollinator": 2, "Pawpatch Recruit": 2, "Guiding Hydra": 1}
+    "in": {
+      "Doorkeeper Thrull": 4,
+      "Erode": 1
+    },
+    "out": {
+      "Gene Pollinator": 2,
+      "Pawpatch Recruit": 2,
+      "Guiding Hydra": 1
+    }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Doorkeeper Thrull stops enter triggers and blocks fliers; cheap exile and removal.",
+    "in": {
+      "Doorkeeper Thrull": 4,
+      "Sheltered by Ghosts": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Gene Pollinator": 2,
+      "Pawpatch Recruit": 2,
+      "Guiding Hydra": 1,
+      "Practiced Offense": 2
+    }
   }
 }

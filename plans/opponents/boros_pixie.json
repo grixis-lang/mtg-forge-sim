@@ -1,17 +1,55 @@
 {
   "control": {
     "_why": "Few creatures to hit, so cut cheap creature removal. Clarion Conqueror is a flying threat that also shuts off planeswalker and artifact abilities; Sheltered by Ghosts exiles a planeswalker or key permanent.",
-    "in": {"Clarion Conqueror": 3, "Sheltered by Ghosts": 2},
-    "out": {"Erode": 1, "Torch the Tower": 2, "Guiding Hydra": 1, "Practiced Offense": 1}
+    "in": {
+      "Clarion Conqueror": 3,
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Erode": 1,
+      "Torch the Tower": 2,
+      "Guiding Hydra": 1,
+      "Practiced Offense": 1
+    }
   },
   "midrange": {
     "_why": "Sunspine Lynx is a bigger body that stops lifegain; Sheltered by Ghosts answers a big threat. Cuts the slow and fragile cards.",
-    "in": {"Sunspine Lynx": 3, "Sheltered by Ghosts": 2},
-    "out": {"Springleaf Drum": 2, "Practiced Offense": 2, "Guiding Hydra": 1}
+    "in": {
+      "Sunspine Lynx": 3,
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Springleaf Drum": 2,
+      "Practiced Offense": 2,
+      "Guiding Hydra": 1
+    }
   },
   "aggro": {
     "_why": "Authority of the Consuls slows their attackers and gains life; Seam Rip and Erode remove cheap threats. Cuts the slow cards.",
-    "in": {"Authority of the Consuls": 2, "Seam Rip": 2, "Erode": 1},
-    "out": {"Practiced Offense": 2, "Springleaf Drum": 2, "Guiding Hydra": 1}
+    "in": {
+      "Authority of the Consuls": 2,
+      "Seam Rip": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Practiced Offense": 2,
+      "Springleaf Drum": 2,
+      "Guiding Hydra": 1
+    }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Rest in Peace, Authority of the Consuls (our creatures enter tapped, they gain life), cheap exile and removal. Cuts Springleaf Drum (Forge's AI can't use it) and slow cards.",
+    "in": {
+      "Rest in Peace": 2,
+      "Authority of the Consuls": 2,
+      "Seam Rip": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Practiced Offense": 2,
+      "Springleaf Drum": 2,
+      "Guiding Hydra": 1,
+      "Starfield Shepherd": 2
+    }
   }
 }

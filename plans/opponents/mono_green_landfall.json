@@ -36,5 +36,19 @@
       "Keen-Eyed Curator": 2,
       "Sazh's Chocobo": 2
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Keeps both Keen-Eyed Curators (graveyard hate, cut in its plan against aggro), adds Torpor Orb and removal.",
+    "in": {
+      "Hard-Hitting Question": 3,
+      "Torpor Orb": 2,
+      "Mightform Harmonizer": 1
+    },
+    "out": {
+      "Sazh's Chocobo": 2,
+      "Sapling Nursery": 2,
+      "Earthbender Ascension": 1,
+      "Llanowar Elves": 1
+    }
   }
 }

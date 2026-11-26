@@ -36,5 +36,19 @@
       "Spell Snare": 1,
       "The Wondrous Wasp": 1
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Strategic Betrayal exiles the whole graveyard, Vren exiles our dying creatures, Day of Black Sun sweeps cheap creatures.",
+    "in": {
+      "Strategic Betrayal": 2,
+      "Day of Black Sun": 2,
+      "Requiting Hex": 1,
+      "Vren, the Relentless": 1
+    },
+    "out": {
+      "We Say Thee Nay!": 2,
+      "The Wondrous Wasp": 2,
+      "Enduring Curiosity": 2
+    }
   }
 }

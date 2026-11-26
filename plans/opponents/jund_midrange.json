@@ -37,5 +37,20 @@
       "The Misty Mountains Cold": 2,
       "Obsessive Pursuit": 2
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Fire Magic sweeps small creatures, Strategic Betrayal exiles the graveyard, more removal and life gain.",
+    "in": {
+      "Fire Magic": 2,
+      "Bitter Triumph": 2,
+      "Strategic Betrayal": 2,
+      "Professor Dellian Fel": 1
+    },
+    "out": {
+      "The Misty Mountains Cold": 2,
+      "Obsessive Pursuit": 2,
+      "Lively Dirge": 2,
+      "Gene Pollinator": 1
+    }
   }
 }

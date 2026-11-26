@@ -29,5 +29,18 @@
       "Skateboard": 2,
       "Dragonfire Blade": 2
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Rest in Peace and cheap exile effects; cuts some equipment, as in its plan against aggro.",
+    "in": {
+      "Rest in Peace": 2,
+      "Seam Rip": 2,
+      "Sheltered by Ghosts": 2
+    },
+    "out": {
+      "Skateboard": 2,
+      "Lavaspur Boots": 2,
+      "Dragonfire Blade": 2
+    }
   }
 }

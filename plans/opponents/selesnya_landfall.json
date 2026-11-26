@@ -1,17 +1,54 @@
 {
   "control": {
     "_why": "Surrak can't be countered and draws when targeted; Sapling Nursery keeps making 3/4s through removal and wipes. Cuts creature removal and the weakest card-flow spell.",
-    "in": {"Surrak, Elusive Hunter": 3, "Sapling Nursery": 3},
-    "out": {"Doorkeeper Thrull": 3, "Erode": 2, "Esper Origins": 1}
+    "in": {
+      "Surrak, Elusive Hunter": 3,
+      "Sapling Nursery": 3
+    },
+    "out": {
+      "Doorkeeper Thrull": 3,
+      "Erode": 2,
+      "Esper Origins": 1
+    }
   },
   "midrange": {
     "_why": "Surrak is a strong 3-drop vs removal; Sheltered by Ghosts and Erode answer their best threat.",
-    "in": {"Surrak, Elusive Hunter": 3, "Sheltered by Ghosts": 2, "Erode": 1},
-    "out": {"Esper Origins": 3, "Carnivorous Cultivator": 2, "Doorkeeper Thrull": 1}
+    "in": {
+      "Surrak, Elusive Hunter": 3,
+      "Sheltered by Ghosts": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Esper Origins": 3,
+      "Carnivorous Cultivator": 2,
+      "Doorkeeper Thrull": 1
+    }
   },
   "aggro": {
     "_why": "Clarion Conqueror blocks fliers; Erode and Seam Rip kill early threats. Cuts the slow card-flow spells.",
-    "in": {"Clarion Conqueror": 4, "Erode": 1, "Seam Rip": 1},
-    "out": {"Esper Origins": 3, "Doorkeeper Thrull": 2, "Mightform Harmonizer": 1}
+    "in": {
+      "Clarion Conqueror": 4,
+      "Erode": 1,
+      "Seam Rip": 1
+    },
+    "out": {
+      "Esper Origins": 3,
+      "Doorkeeper Thrull": 2,
+      "Mightform Harmonizer": 1
+    }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Keeps all Doorkeeper Thrulls (they stop enter triggers; its plan against aggro cut two) and adds cheap exile and removal.",
+    "in": {
+      "Doorkeeper Thrull": 1,
+      "Seam Rip": 1,
+      "Sheltered by Ghosts": 2,
+      "Erode": 1
+    },
+    "out": {
+      "Esper Origins": 3,
+      "Mightform Harmonizer": 1,
+      "Sazh's Chocobo": 1
+    }
   }
 }

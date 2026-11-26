@@ -33,5 +33,19 @@
       "Aunt May": 2,
       "Liliana the Faultless": 1
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). Graveyard exile, cheap exile for 1-2 drops, lifelink blockers. Cuts the weakest life-gain pieces.",
+    "in": {
+      "Seam Rip": 2,
+      "Strategic Betrayal": 1,
+      "Ghost Vacuum": 1,
+      "Shattered Acolyte": 2
+    },
+    "out": {
+      "Aunt May": 2,
+      "Liliana the Faultless": 2,
+      "Lunar Convocation": 2
+    }
   }
 }

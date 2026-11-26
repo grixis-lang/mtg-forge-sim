@@ -33,5 +33,16 @@
       "Sleight of Hand": 2,
       "Opt": 2
     }
+  },
+  "graveyard": {
+    "_why": "Added 2026-11-26: their best against graveyard-based aggro decks (graveyard hate, cards that stop enter triggers, cheap removal, sweepers). No graveyard hate in the sideboard. Fire Magic sweeps small creatures; Spell Snare hits 2-drops. Same as its plan against aggro.",
+    "in": {
+      "Fire Magic": 2,
+      "Spell Snare": 2
+    },
+    "out": {
+      "Sleight of Hand": 2,
+      "Opt": 2
+    }
   }
 }
