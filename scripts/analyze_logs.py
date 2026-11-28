@@ -833,6 +833,40 @@ def combat_stats(games: list[dict], attacker_side: str):
     return per_round, blockers, attackers, outcomes
 
 
+def arrival_report(games: list[dict], rounds: tuple = (2, 3, 4, 5, 6)) -> list[str]:
+    """Section (needs patch 22's Creature lines): how fast each of our creatures reaches the battlefield, cast or
+    returned from the graveyard, and how many times it entered in a game. Forge gives a card a new id each time it
+    changes zones, so each different id seen on the battlefield is one more time it entered (a Bloodghast that came
+    back twice = 3 ids). Read at the start of each turn, so a creature that entered and left in the same turn is missed."""
+    out = ["", "## How fast our creatures reach the battlefield", ""]
+    if not any(g["creature_sizes"] for g in games):
+        return out + ["No creature lines in these logs (they need Forge patch 22_log_creatures).", ""]
+    n = len(games)
+    first = defaultdict(list)                 # card -> first round seen, one per game where it was seen
+    entries = defaultdict(list)               # card -> number of different ids seen, one per game where it was seen
+    for g in games:
+        seen_round, ids = {}, defaultdict(set)
+        for turn, who, cid, name, *_ in g["creature_sizes"]:
+            if who != "us" or name.endswith("Token"):
+                continue
+            rnd = (turn + 1) // 2
+            seen_round[name] = min(seen_round.get(name, rnd), rnd)
+            ids[name].add(cid)
+        for name, rnd in seen_round.items():
+            first[name].append(rnd)
+            entries[name].append(len(ids[name]))
+    out += ["Counted at the start of each turn. \"By round N\" = share of ALL games where it was on the battlefield by then.", "",
+            "| Card | Games on the battlefield | First round (average) | " + " | ".join(f"By round {r}" for r in rounds)
+            + " | Times it entered per game (when seen) |",
+            "|---|---:|---:|" + "---:|" * len(rounds) + "---:|"]
+    for name, rs in sorted(first.items(), key=lambda kv: -len(kv[1]))[:14]:
+        cells = [pct(sum(1 for x in rs if x <= r), n) for r in rounds]
+        out.append(f"| {name} | {len(rs)} | {statistics.mean(rs):.1f} | " + " | ".join(cells)
+                   + f" | {statistics.mean(entries[name]):.1f} |")
+    out.append("")
+    return out
+
+
 def creature_size_report(games: list[dict]) -> list[str]:
     """Section: how big creatures with +1/+1 or -1/-1 counters are, round by round (needs patch 22).
 
@@ -1445,6 +1479,7 @@ def report(games: list[dict], ours: str, opponent: str,
     # --- Combat: attacks and blocks -----------------------------------------
     out += combat_report(games)
     out += creature_size_report(games)
+    out += arrival_report(games)
     out += sacrifice_report(games)
 
     # --- Running out of gas ------------------------------------------------
