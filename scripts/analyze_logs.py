@@ -231,6 +231,7 @@ def new_game() -> dict:
         "sacrifices": [],         # {"n", "turn", "id", "card", "creature", "token", "cause", "cause_side", "side"}
         "life_loss": [],          # {"n", "turn", "amount", "source", "source_side", "side"} (not damage)
         "line_no": 0,
+        "first_turn_lines": [],   # patch 99 (temporary): every log line of our first turn, in order
         "ai_debug": [],           # patch 99 (temporary): ("order", phase, text) / ("opinion", phase, card, answer), ours only
     }
 
@@ -290,6 +291,10 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
         g["line_no"] += 1
 
         m = TURN.match(line)
+        if m and g["our_turn_index"] == 1 and g.get("capturing"):
+            g["capturing"] = False                     # our first turn is over
+        if g.get("capturing") and line.startswith(("Turn: AiDebug", "Add To Stack", "Land:", "Zone Change")):
+            g["first_turn_lines"].append(line[:300])
         if m:
             turn_no, player = int(m.group(1)), m.group(2)
             g["turns"] = max(g["turns"], turn_no)
@@ -299,6 +304,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["on_play"] = is_ours(player)         # who took turn 1
             if is_ours(player):
                 g["our_turn_index"] += 1                # our 1st, 2nd, 3rd turn...
+                g["capturing"] = g["our_turn_index"] == 1
             continue
 
         m = AIDEBUG_ORDER.match(line)
@@ -737,6 +743,19 @@ def ai_debug_report(games: list[dict]) -> list[str]:
         out += ["", "Creature spells the AI cast, and the code path that asked for it (most recent call first):", "",
                 "| Phase | Card and path | Times |", "|---|---|---:|"]
         out += [f"| {ph} | {c} | {k} |" for (ph, c), k in plays.most_common(25)]
+    # examples: games whose opening hand had two or more different cards that we cast on turn 1 in some game
+    t1_cards = {c for c, k in Counter(c for x in games for c, t in x["cast"] if t == 1).items() if k >= 3}
+    samples = [g for g in games if g["first_turn_lines"] and len(t1_cards & set(g["opening"])) >= 2]
+    shown = 0
+    for g in samples:
+        if not [c for c, t in g["cast"] if t == 1]:
+            continue
+        out += ["", f"Example: our first turn, line by line (opening hand: {' ; '.join(g['opening'])}):", "", "```"]
+        out += [ln.replace("Turn: AiDebug ", "") for ln in g["first_turn_lines"][:60]]
+        out.append("```")
+        shown += 1
+        if shown >= 3:
+            break
     canplay = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "canplay")
     if canplay:
         out += ["", "Every \"can I play this creature?\" answer and who asked (most recent call first):", "",
