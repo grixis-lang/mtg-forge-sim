@@ -26,6 +26,11 @@ Reads Forge's full game log (saved by run_matchup.py --log-out) and reports:
  10. Combat report (added 2026-11-25): how often each side's attackers get
      blocked, round by round; which creatures block most; and what happens
      when an attack is blocked (attacker dies, blocker dies, both, neither)
+ 12. Turn-1 choices (added 2026-11-28, needs patch 03's opening-hand lines): for
+     each card we cast on our first turn, how often it was cast then when it was
+     in the opening hand with a land, what was cast instead, and head-to-head
+     results when two such cards were in the same opening hand (shows which
+     1-drop Forge's AI prefers)
  11. Sacrifice report (added 2026-11-27, needs Forge patch 23): what each side
      sacrificed and what made it sacrifice; life lost without damage
      ("drains", paid life) by the card that caused it; how often a sacrifice of
@@ -620,6 +625,65 @@ def cast_by_turn_report(games: list[dict], last_turn: int = 6) -> list[str]:
         out.append(f"| {card} | " + " | ".join(str(cnt[t]) if cnt[t] else "" for t in range(1, last_turn + 1)) + " |")
     out.append("| **Nothing cast** | " + " | ".join(
         f"{reached[t] - did_something[t]} of {reached[t]}" for t in range(1, last_turn + 1)) + " |")
+    return out
+
+
+def turn_one_report(games: list[dict], min_casts: int = 3, min_pair_games: int = 8) -> list[str]:
+    """Section: what we cast on our first turn, compared with what was in the opening hand.
+
+    "Turn-1 cards" = cards we cast on our first turn in at least min_casts games (in practice: our
+    1-mana spells). Only games whose kept opening hand is in the log (Forge patch 03) and has at
+    least one land count. On the draw our first turn also has the card we drew, so a few turn-1
+    casts come from outside the opening hand.
+    Part 1 - for each turn-1 card in the opening hand: how often it was cast on turn 1, and what
+             we cast instead when it wasn't (or "nothing").
+    Part 2 - when two different turn-1 cards were both in the opening hand: which one came first.
+    """
+    out = ["", "## Turn-1 choices (which 1-drop does the AI play first?)", ""]
+    land_names = set().union(*(g["our_land_names"] for g in games)) if games else set()
+    first_turn = []                                   # (opening hand, [cards cast on our turn 1, in order])
+    for g in games:
+        if not g["opening"]:
+            continue
+        if not any(c in land_names for c in g["opening"]):
+            continue
+        first_turn.append((g["opening"], [card for card, t in g["cast"] if t == 1]))
+    if not first_turn:
+        return out + ["No opening hands with a land in these logs (they need Forge patch 03).", ""]
+    t1_count = Counter(c for _, casts in first_turn for c in set(casts))
+    cards = sorted(c for c, k in t1_count.items() if k >= min_casts)
+    if not cards:
+        return out + ["No card was cast on our first turn often enough to report.", ""]
+
+    # --- 1. Each turn-1 card: cast on turn 1 when it was in the opening hand? -----------------------
+    out += [f"Games with a kept opening hand that had a land: {len(first_turn)}.", "",
+            "| Card | In the opening hand | Cast on turn 1 | Not cast: what we cast instead |",
+            "|---|---:|---:|---|"]
+    for card in sorted(cards, key=lambda c: -t1_count[c]):
+        held = [(hand, casts) for hand, casts in first_turn if card in hand]
+        if not held:
+            continue
+        cast = sum(1 for _, casts in held if card in casts)
+        instead = Counter((casts[0] if casts else "nothing") for _, casts in held if card not in casts)
+        out.append(f"| {card} | {len(held)} | {cast} ({pct(cast, len(held))}) | "
+                   + ", ".join(f"{c} {k}" for c, k in instead.most_common(4)) + " |")
+
+    # --- 2. Head to head: both cards in the same opening hand ---------------------------------------
+    rows = []
+    for i, a in enumerate(cards):
+        for b in cards[i + 1:]:
+            both = [casts for hand, casts in first_turn if a in hand and b in hand]
+            if len(both) < min_pair_games:
+                continue
+            first_a = sum(1 for casts in both if a in casts and (b not in casts or casts.index(a) < casts.index(b)))
+            first_b = sum(1 for casts in both if b in casts and (a not in casts or casts.index(b) < casts.index(a)))
+            rows.append((a, b, len(both), first_a, first_b, len(both) - first_a - first_b))
+    if rows:
+        out += ["", f"When two turn-1 cards were in the same opening hand ({min_pair_games}+ games): which was cast first.", "",
+                "| Card A | Card B | Games | A first | B first | Neither |", "|---|---|---:|---:|---:|---:|"]
+        for a, b, n, fa, fb, nn in sorted(rows, key=lambda r: -r[2]):
+            out.append(f"| {a} | {b} | {n} | {fa} | {fb} | {nn} |")
+    out.append("")
     return out
 
 
@@ -1335,6 +1399,7 @@ def report(games: list[dict], ours: str, opponent: str,
 
     # --- Cards cast by turn (what we actually did early) ---------------------
     out += cast_by_turn_report(games)
+    out += turn_one_report(games)
 
     # --- Biggest threats -----------------------------------------------------
     dmg = Counter()
