@@ -1,0 +1,16 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index b864bd9f..a63e63ff 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -3230,6 +3230,11 @@ public class AiController {
+             case CantPlaySa, CantAfford, CantAffordX, StopRunawayActivations, TimingRestrictions,
+                     WouldDestroyLegend, WouldBecomeZeroToughnessCreature:
+                 return false;
++            // mtg-forge-sim patch 25: a play the card's own script rules out for the AI (AICheckSVar, NeedsToPlay...)
++            // stays out. Those are the script author's explicit "not now"; the rollouts cannot see why (for example a
++            // "discard or pay 3 life" spell told to discard while a card that returns from the graveyard is in hand).
++            case NeedsToPlayCriteriaNotMet:
++                return false;
+             default:
+                 break;
+         }
