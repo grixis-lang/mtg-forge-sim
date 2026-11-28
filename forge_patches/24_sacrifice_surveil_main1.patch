@@ -1,0 +1,27 @@
+diff --git a/forge-ai/src/main/java/forge/ai/ability/SurveilAi.java b/forge-ai/src/main/java/forge/ai/ability/SurveilAi.java
+index a3f3b358..38794a84 100644
+--- a/forge-ai/src/main/java/forge/ai/ability/SurveilAi.java
++++ b/forge-ai/src/main/java/forge/ai/ability/SurveilAi.java
+@@ -3,6 +3,7 @@ package forge.ai.ability;
+ import forge.ai.*;
+ import forge.game.cost.Cost;
+ import forge.game.cost.CostPayLife;
++import forge.game.cost.CostSacrifice;
+ import forge.game.phase.PhaseHandler;
+ import forge.game.phase.PhaseType;
+ import forge.game.player.Player;
+@@ -54,6 +55,14 @@ public class SurveilAi extends SpellAbilityAi {
+             if (isSorcerySpeed(sa, ai)) {
+                 return ph.is(PhaseType.MAIN1) || sa.isPwAbility();
+             } else {
++                // mtg-forge-sim patch 24: a surveil ability that sacrifices something (Umbral Collar Zealot) may also be
++                // used in the first main phase. With Flat Monte Carlo on, the AI does nothing in its own upkeep, so the
++                // upkeep-only rule meant such an outlet was never used on the AI's own turn. Before combat is also
++                // when the deaths count this turn (a card that returns when creatures died, a creature that grows
++                // when cards hit the graveyard).
++                if (sa.getPayCosts().hasSpecificCostType(CostSacrifice.class) && ph.is(PhaseType.MAIN1)) {
++                    return true;
++                }
+                 return ph.is(PhaseType.UPKEEP);
+             }
+         }

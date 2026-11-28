@@ -231,6 +231,7 @@ def new_game() -> dict:
         "sacrifices": [],         # {"n", "turn", "id", "card", "creature", "token", "cause", "cause_side", "side"}
         "life_loss": [],          # {"n", "turn", "amount", "source", "source_side", "side"} (not damage)
         "line_no": 0,
+        "turn_side": {},          # forge turn -> "us"/"opp": whose turn it was
         "first_turn_lines": [],   # patch 99 (temporary): every log line of our first turn, in order
         "ai_debug": [],           # patch 99 (temporary): ("order", phase, text) / ("opinion", phase, card, answer), ours only
     }
@@ -300,6 +301,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
             g["turns"] = max(g["turns"], turn_no)
             g["forge_turn"] = turn_no
             g["snapshots"].append(snapshot(turn_no))
+            g["turn_side"][turn_no] = side(player)
             if g["on_play"] is None:
                 g["on_play"] = is_ours(player)         # who took turn 1
             if is_ours(player):
@@ -960,10 +962,11 @@ def sacrifice_report(games: list[dict]) -> list[str]:
             out.append(f"| {card} | {row['times']} | {row['times'] / n:.2f} | {len(row['games'])} | "
                        f"{'yes' if row['token'] else 'no'} |")
         causes = Counter((s["cause"], whose(s["cause_side"])) for _, s in our_cre)
-        out += ["", "### What made us sacrifice", "", "| Card | Whose card | Times | Per game |",
-                "|---|---|---:|---:|"]
+        on_our_turn = Counter(s["cause"] for gi, s in our_cre if games[gi]["turn_side"].get(s["turn"]) == "us")
+        out += ["", "### What made us sacrifice", "", "| Card | Whose card | Times | Per game | On our turn |",
+                "|---|---|---:|---:|---:|"]
         for (cause, side_), k in causes.most_common(10):
-            out.append(f"| {cause} | {side_} | {k} | {k / n:.2f} |")
+            out.append(f"| {cause} | {side_} | {k} | {k / n:.2f} | {pct(on_our_turn[cause], k)} |")
         out.append("")
 
     # --- 2. Their sacrifices (short) -------------------------------------------------------------------
