@@ -1,0 +1,16 @@
+diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+index 1d75a6d0..9bdf2cbf 100644
+--- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
++++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+@@ -644,7 +644,10 @@ public class PlayerControllerAi extends PlayerController {
+             toTop.addAll(topN);
+         } else {
+             for (Card c : topN) {
+-                if (ComputerUtil.scryWillMoveCardToBottomOfLibrary(player, c)) {
++                // mtg-forge-sim patch 26: a card whose script marks it as good to have in the graveyard (DiscardMe,
++                // e.g. Bloodghast, which returns from there) goes to the graveyard. Surveil, unlike scry, puts cards
++                // there, and the scry rule below only bins extra lands and weak draws.
++                if (c.hasSVar("DiscardMe") || ComputerUtil.scryWillMoveCardToBottomOfLibrary(player, c)) {
+                     toGraveyard.add(c);
+                 } else {
+                     toTop.add(c);
