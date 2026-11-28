@@ -1,0 +1,144 @@
+diff --git a/forge-game/src/main/java/forge/game/SacrificeLog.java b/forge-game/src/main/java/forge/game/SacrificeLog.java
+new file mode 100644
+index 0000000..d516988
+--- /dev/null
++++ b/forge-game/src/main/java/forge/game/SacrificeLog.java
+@@ -0,0 +1,116 @@
++package forge.game;
++
++import forge.game.card.Card;
++import forge.game.event.GameEventAddLog;
++import forge.game.player.Player;
++import forge.game.spellability.SpellAbility;
++
++/**
++ * mtg-forge-sim: logs every sacrifice, and every time a player loses life without being dealt damage,
++ * with the card that caused it.
++ * <p>
++ * Why: Forge fires an event when a permanent is sacrificed (it plays a sound), but the game log never
++ * shows it. And a "lose 1 life" line in the log only says whose life went down, not which card did it.
++ * With these two lines our report can show what each deck sacrifices, what made it sacrifice
++ * (its own card or an opponent's "sacrifice a creature" effect), and how much life each "drain" card
++ * (for example "whenever a creature dies, target opponent loses 1 life") takes from the opponent.
++ * <p>
++ * LOG ONLY: nothing in this class changes how a game is played. It only reads the game state.
++ * <p>
++ * WHEN:
++ * <ul>
++ * <li>Sacrifice line: when a permanent is sacrificed, from Player.addSacrificedThisTurn (called by
++ * GameAction.sacrifice for every sacrificed permanent, as a cost or as an effect).</li>
++ * <li>LifeLoss line: right after the normal "Life: ... 20 > 19" line, from Player.loseLife, only for
++ * life lost that is NOT damage (damage already has its own "Damage:" lines with the source).
++ * Paying life (a "Pay 2 life" cost) is counted too: the report tells them apart by who controls
++ * the source.</li>
++ * </ul>
++ * Example lines, as they appear in the game log:
++ * <pre>
++ * Zone Change: Sacrifice turn=9 id=57 creature=yes token=no | card=Some Creature | cause=Some Spell | cause_player=Ai(1)-our_deck | player=Ai(1)-our_deck
++ * Life: LifeLoss turn=9 amount=1 | source=Some Drain Creature | source_player=Ai(1)-our_deck | player=Ai(2)-their_deck
++ * </pre>
++ * Card names can contain spaces and commas, so every field that can is put between " | " separators.
++ * Read by mtg-forge-sim's scripts/analyze_logs.py ("Sacrifice report").
++ */
++public final class SacrificeLog {
++
++    /** Utility class: only static methods, never created. */
++    private SacrificeLog() {
++    }
++
++    /**
++     * Logs one line for a sacrificed permanent.
++     *
++     * @param game       the game being played
++     * @param controller the player who sacrificed it
++     * @param card       the sacrificed card, as it was on the battlefield (last known information)
++     * @param cause      the spell or ability that made it be sacrificed (can be null)
++     */
++    public static void logSacrifice(final Game game, final Player controller, final Card card, final SpellAbility cause) {
++        // 1. Nothing to log without a card (should not happen, but never crash a game over a log line)
++        if (game == null || controller == null || card == null) {
++            return;
++        }
++        // 2. Build the line: numbers first, then the fields that can contain spaces
++        final StringBuilder sb = new StringBuilder("Sacrifice");
++        sb.append(" turn=").append(game.getPhaseHandler().getTurn());
++        sb.append(" id=").append(card.getId());
++        sb.append(" creature=").append(card.isCreature() ? "yes" : "no");
++        sb.append(" token=").append(card.isToken() ? "yes" : "no");
++        sb.append(" | card=").append(card.getName());
++        sb.append(" | cause=").append(sourceName(cause));
++        sb.append(" | cause_player=").append(sourcePlayerName(cause));
++        sb.append(" | player=").append(controller.getName());
++        // 3. Add it to the game log (ZONE_CHANGE: shown with the "Zone Change: " prefix)
++        game.fireEvent(new GameEventAddLog(GameLogEntryType.ZONE_CHANGE, sb.toString()));
++    }
++
++    /**
++     * Logs one line when a player loses life that is not damage ("loses 1 life", "pay 2 life").
++     *
++     * @param game   the game being played
++     * @param loser  the player who lost the life
++     * @param amount how much life was lost
++     * @param damage true when the life was lost to damage (then nothing is logged)
++     * @param cause  the spell or ability that made the player lose life (can be null)
++     */
++    public static void logLifeLoss(final Game game, final Player loser, final int amount, final boolean damage,
++                                   final SpellAbility cause) {
++        // 1. Damage already has its own "Damage:" log lines (with the source), so skip it here
++        if (damage || amount <= 0 || game == null || loser == null) {
++            return;
++        }
++        // 2. Build the line: numbers first, then the fields that can contain spaces
++        final StringBuilder sb = new StringBuilder("LifeLoss");
++        sb.append(" turn=").append(game.getPhaseHandler().getTurn());
++        sb.append(" amount=").append(amount);
++        sb.append(" | source=").append(sourceName(cause));
++        sb.append(" | source_player=").append(sourcePlayerName(cause));
++        sb.append(" | player=").append(loser.getName());
++        // 3. Add it to the game log (LIFE: shown with the "Life: " prefix)
++        game.fireEvent(new GameEventAddLog(GameLogEntryType.LIFE, sb.toString()));
++    }
++
++    /** The name of the card a spell or ability comes from, or "unknown". */
++    private static String sourceName(final SpellAbility cause) {
++        if (cause == null || cause.getHostCard() == null) {
++            return "unknown";
++        }
++        return cause.getHostCard().getName();
++    }
++
++    /** The name of the player who controls that spell or ability, or "unknown". */
++    private static String sourcePlayerName(final SpellAbility cause) {
++        if (cause == null) {
++            return "unknown";
++        }
++        // the player who cast/activated it, or who controls the card a trigger comes from
++        Player p = cause.getActivatingPlayer();
++        if (p == null && cause.getHostCard() != null) {
++            p = cause.getHostCard().getController();
++        }
++        return p == null ? "unknown" : p.getName();
++    }
++}
+diff --git a/forge-game/src/main/java/forge/game/player/Player.java b/forge-game/src/main/java/forge/game/player/Player.java
+index 0df61b0..2e7bb10 100644
+--- a/forge-game/src/main/java/forge/game/player/Player.java
++++ b/forge-game/src/main/java/forge/game/player/Player.java
+@@ -560,6 +560,8 @@ public class Player extends GameEntity implements Comparable<Player> {
+             game.fireEvent(new GameEventManaBurn(PlayerView.get(this), true, toLose));
+         } else {
+             game.fireEvent(new GameEventPlayerLivesChanged(this, oldLife, life));
++            // mtg-forge-sim patch 23: say which card made us lose this life (log only, not for damage)
++            forge.game.SacrificeLog.logLifeLoss(game, this, toLose, damage, cause);
+         }
+ 
+         boolean firstLost = lifeLostThisTurn == 0;
+@@ -2353,6 +2355,8 @@ public class Player extends GameEntity implements Comparable<Player> {
+     public final void addSacrificedThisTurn(final Card cpy, final SpellAbility source) {
+         // Play the Sacrifice sound
+         game.fireEvent(new GameEventCardSacrificed(CardView.get(cpy)));
++        // mtg-forge-sim patch 23: also write the sacrifice to the game log (log only)
++        forge.game.SacrificeLog.logSacrifice(game, this, cpy, source);
+ 
+         sacrificedThisTurn.add(cpy);
+ 

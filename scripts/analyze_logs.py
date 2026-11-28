@@ -26,6 +26,11 @@ Reads Forge's full game log (saved by run_matchup.py --log-out) and reports:
  10. Combat report (added 2026-11-25): how often each side's attackers get
      blocked, round by round; which creatures block most; and what happens
      when an attack is blocked (attacker dies, blocker dies, both, neither)
+ 11. Sacrifice report (added 2026-11-27, needs Forge patch 23): what each side
+     sacrificed and what made it sacrifice; life lost without damage
+     ("drains", paid life) by the card that caused it; how often a sacrifice of
+     ours was followed by a drain; win % by sacrifices and drains per game.
+     With patch 23 the "finishing blow" also names the card behind a life loss
 
 How to run (Python 3.10+, no extra packages needed):
     python scripts/analyze_logs.py <game-log> <our deck name> <output.md> [<cardsfolder>]
@@ -86,6 +91,13 @@ DIES = re.compile(r"^Zone Change: (.+?) \((\d+)\) was put into (\w+) from Battle
 # "Turn: Creature turn=7 power=5 toughness=5 p1p1=0 m1m1=2 id=123 card=Some Creature player=Ai(1)-deck"
 CREATURE = re.compile(r"^Turn: Creature turn=(\d+) power=(-?\d+) toughness=(-?\d+) p1p1=(\d+) m1m1=(\d+) "
                       r"id=(\d+) card=(.+?) player=(.+)$")
+# Patch 23 (23_log_sacrifices): one line per sacrificed permanent, and one line per non-damage life loss:
+# "Zone Change: Sacrifice turn=9 id=57 creature=yes token=no | card=X | cause=Y | cause_player=P1 | player=P1"
+# "Life: LifeLoss turn=9 amount=1 | source=Z | source_player=P1 | player=P2"
+SACRIFICE = re.compile(r"^Zone Change: Sacrifice turn=(\d+) id=(\d+) creature=(yes|no) token=(yes|no) "
+                       r"\| card=(.+?) \| cause=(.+?) \| cause_player=(.+?) \| player=(.+)$")
+LIFELOSS = re.compile(r"^Life: LifeLoss turn=(\d+) amount=(\d+) \| source=(.+?) \| source_player=(.+?) "
+                      r"\| player=(.+)$")
 OUTCOME_TURN = re.compile(r"^Game Outcome: Turn (\d+)")
 OUTCOME_LOST = re.compile(r"^Game Outcome: (.+?) has lost because (.+)$")
 RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has won!")
@@ -203,6 +215,10 @@ def new_game() -> dict:
         "attacks": [],            # (forge turn, attacking side, [(name, id)]) one entry per attack line
         "blocks": [],             # (forge turn, blocking side, [(blocker name, id)], [(attacker name, id)])
         "creature_sizes": [],     # patch 22: (forge turn, side, id, name, power, toughness, p1p1, m1m1)
+        # patch 23: each entry is a dict; "n" is the line number inside the game, so we know the order
+        "sacrifices": [],         # {"n", "turn", "id", "card", "creature", "token", "cause", "cause_side", "side"}
+        "life_loss": [],          # {"n", "turn", "amount", "source", "source_side", "side"} (not damage)
+        "line_no": 0,
     }
 
 
@@ -258,6 +274,7 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
     games, g = [], new_game()
     for raw in log_text.splitlines():
         line = raw.strip()
+        g["line_no"] += 1
 
         m = TURN.match(line)
         if m:
@@ -269,6 +286,28 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["on_play"] = is_ours(player)         # who took turn 1
             if is_ours(player):
                 g["our_turn_index"] += 1                # our 1st, 2nd, 3rd turn...
+            continue
+
+        m = SACRIFICE.match(line)
+        if m:
+            cause_player = m.group(7).strip()
+            g["sacrifices"].append({
+                "n": g["line_no"], "turn": int(m.group(1)), "id": m.group(2),
+                "creature": m.group(3) == "yes", "token": m.group(4) == "yes",
+                "card": m.group(5).strip(), "cause": m.group(6).strip(),
+                "cause_side": None if cause_player == "unknown" else side(cause_player),
+                "side": side(m.group(8))})
+            continue
+
+        m = LIFELOSS.match(line)
+        if m:
+            source, source_player, who = m.group(3).strip(), m.group(4).strip(), side(m.group(5))
+            g["life_loss"].append({
+                "n": g["line_no"], "turn": int(m.group(1)), "amount": int(m.group(2)), "source": source,
+                "source_side": None if source_player == "unknown" else side(source_player), "side": who})
+            # the finishing-blow report can now name the card instead of "life loss effect"
+            if source != "unknown":
+                g["last_hit"][who], g["last_event"][who] = f"{source} (life loss)", "life"
             continue
 
         m = CREATURE.match(line)
@@ -739,6 +778,123 @@ def creature_size_report(games: list[dict]) -> list[str]:
     return out
 
 
+def sacrifice_report(games: list[dict]) -> list[str]:
+    """Section: sacrifices and drains (needs Forge patch 23).
+
+    Part 1 - what we sacrificed (creatures), and what made us do it: our own card (a cost, a
+             trigger) or one of theirs (an "each opponent sacrifices" effect).
+    Part 2 - what they sacrificed, in short.
+    Part 3 - life lost WITHOUT damage, by the card that caused it: drains ("target opponent loses
+             1 life"), paid life, "you lose 1 life" draw engines.
+    Part 4 - did our sacrifices lead to damage? For each creature we sacrificed, the life they lost
+             to our cards after it, in the same turn, before our next sacrifice.
+    Part 5 - win % by how many creatures we sacrificed and how much we drained per game.
+    """
+    out = ["", "## Sacrifice report (sacrifices and drains)", ""]
+    if not any(g["sacrifices"] or g["life_loss"] for g in games):
+        return out + ["No Sacrifice or LifeLoss lines in these logs (they need Forge patch 23_log_sacrifices).", ""]
+    n = len(games)
+
+    def whose(s: str | None) -> str:
+        return {"us": "ours", "opp": "theirs"}.get(s, "?")
+
+    # --- 1. Our creature sacrifices ------------------------------------------------------------------
+    ours = [(gi, s) for gi, g in enumerate(games) for s in g["sacrifices"] if s["side"] == "us"]
+    our_cre = [(gi, s) for gi, s in ours if s["creature"]]
+    out += [f"Creatures we sacrificed: **{len(our_cre)}** in {n} games ({len(our_cre) / n:.1f} per game). "
+            f"Other permanents we sacrificed (lands, Treasures...): {len(ours) - len(our_cre)}.", ""]
+    if our_cre:
+        by_card = defaultdict(lambda: {"times": 0, "games": set(), "token": False})
+        for gi, s in our_cre:
+            row = by_card[s["card"]]
+            row["times"] += 1; row["games"].add(gi); row["token"] |= s["token"]
+        out += ["### What we sacrificed", "", "| Creature | Times | Per game | Games with one | Token? |",
+                "|---|---:|---:|---:|---|"]
+        for card, row in sorted(by_card.items(), key=lambda kv: -kv[1]["times"])[:12]:
+            out.append(f"| {card} | {row['times']} | {row['times'] / n:.2f} | {len(row['games'])} | "
+                       f"{'yes' if row['token'] else 'no'} |")
+        causes = Counter((s["cause"], whose(s["cause_side"])) for _, s in our_cre)
+        out += ["", "### What made us sacrifice", "", "| Card | Whose card | Times | Per game |",
+                "|---|---|---:|---:|"]
+        for (cause, side_), k in causes.most_common(10):
+            out.append(f"| {cause} | {side_} | {k} | {k / n:.2f} |")
+        out.append("")
+
+    # --- 2. Their sacrifices (short) -------------------------------------------------------------------
+    theirs = [s for g in games for s in g["sacrifices"] if s["side"] == "opp" and s["creature"]]
+    if theirs:
+        top = Counter((s["cause"], whose(s["cause_side"])) for s in theirs).most_common(5)
+        out += [f"Creatures they sacrificed: {len(theirs)} ({len(theirs) / n:.1f} per game). Most often because of: "
+                + "; ".join(f"{c} ({w}, {k})" for (c, w), k in top) + ".", ""]
+
+    # --- 3. Life lost without damage ---------------------------------------------------------------------
+    rows = defaultdict(lambda: {"total": 0, "games": set()})
+    for gi, g in enumerate(games):
+        for ll in g["life_loss"]:
+            row = rows[(ll["source"], whose(ll["source_side"]), "us" if ll["side"] == "us" else "them")]
+            row["total"] += ll["amount"]; row["games"].add(gi)
+    if rows:
+        out += ["### Life lost without damage (drains, paid life)", "",
+                "| Card | Whose card | Who lost the life | Total | Per game | Games |", "|---|---|---|---:|---:|---:|"]
+        for (src, side_, loser), row in sorted(rows.items(), key=lambda kv: -kv[1]["total"])[:12]:
+            out.append(f"| {src} | {side_} | {loser} | {row['total']} | {row['total'] / n:.2f} | {len(row['games'])} |")
+        out.append("")
+
+    def drained(g: dict) -> int:
+        """Life the opponent lost to our cards without damage in this game."""
+        return sum(ll["amount"] for ll in g["life_loss"] if ll["side"] == "opp" and ll["source_side"] == "us")
+
+    wins = [g for g in games if g["result"] == "win"]
+    losses = [g for g in games if g["result"] == "loss"]
+    total = sum(drained(g) for g in games)
+    out += [f"Our cards drained **{total}** life from them without damage ({total / n:.1f} per game; "
+            f"{sum(map(drained, wins)) / max(len(wins), 1):.1f} per win, "
+            f"{sum(map(drained, losses)) / max(len(losses), 1):.1f} per loss).", ""]
+
+    # --- 4. Sacrifice -> drain ----------------------------------------------------------------------------
+    if our_cre:
+        after = defaultdict(list)                         # cause card -> drain after each sacrifice
+        for g in games:
+            sacs = sorted((s for s in g["sacrifices"] if s["side"] == "us" and s["creature"]), key=lambda s: s["n"])
+            for i, s in enumerate(sacs):
+                stop = sacs[i + 1]["n"] if i + 1 < len(sacs) and sacs[i + 1]["turn"] == s["turn"] else 10 ** 9
+                life = sum(ll["amount"] for ll in g["life_loss"]
+                           if ll["side"] == "opp" and ll["source_side"] == "us"
+                           and ll["turn"] == s["turn"] and s["n"] < ll["n"] < stop)
+                after[s["cause"]].append(life)
+        every = [x for v in after.values() for x in v]
+        out += ["### Did our sacrifices make them lose life?", "",
+                "For each creature we sacrificed: the life they lost to our cards (not damage) right after it, "
+                "in the same turn, before our next sacrifice. A drain card that triggers on deaths shows up here.", "",
+                "| What made us sacrifice | Sacrifices | Followed by a drain | Average life drained |",
+                "|---|---:|---:|---:|"]
+        out.append(f"| **All** | {len(every)} | {pct(sum(1 for x in every if x > 0), len(every))} | "
+                   f"{statistics.mean(every):.2f} |")
+        for cause, vals in sorted(after.items(), key=lambda kv: -len(kv[1]))[:8]:
+            out.append(f"| {cause} | {len(vals)} | {pct(sum(1 for x in vals if x > 0), len(vals))} | "
+                       f"{statistics.mean(vals):.2f} |")
+        out.append("")
+
+    # --- 5. Win % by sacrifices and drains per game ------------------------------------------------------------
+    def bucket(x: int, edges: list[tuple[int, int, str]]) -> str:
+        return next(label for lo, hi, label in edges if lo <= x <= hi)
+    sac_edges = [(0, 0, "0"), (1, 2, "1-2"), (3, 4, "3-4"), (5, 10 ** 6, "5+")]
+    drain_edges = [(0, 0, "0"), (1, 2, "1-2"), (3, 5, "3-5"), (6, 10 ** 6, "6+")]
+    by_sac, by_drain = defaultdict(list), defaultdict(list)
+    for g in games:
+        k = sum(1 for s in g["sacrifices"] if s["side"] == "us" and s["creature"])
+        by_sac[bucket(k, sac_edges)].append(score(g))
+        by_drain[bucket(drained(g), drain_edges)].append(score(g))
+    out += ["| Creatures we sacrificed in the game | Games | Win % |", "|---|---:|---:|"]
+    out += [f"| {lab} | {len(by_sac[lab])} | {pct(sum(by_sac[lab]), len(by_sac[lab]))} |"
+            for _, _, lab in sac_edges if by_sac[lab]]
+    out += ["", "| Life we drained in the game | Games | Win % |", "|---|---:|---:|"]
+    out += [f"| {lab} | {len(by_drain[lab])} | {pct(sum(by_drain[lab]), len(by_drain[lab]))} |"
+            for _, _, lab in drain_edges if by_drain[lab]]
+    out += ["", "Longer games have more of both, so a higher win % in a row is a hint, not proof.", ""]
+    return out
+
+
 def combat_report(games: list[dict]) -> list[str]:
     """Section: how often attacks get blocked, by whom, and what happens."""
     out = ["", "## Combat report (attacks and blocks)", "",
@@ -1140,6 +1296,7 @@ def report(games: list[dict], ours: str, opponent: str,
     # --- Combat: attacks and blocks -----------------------------------------
     out += combat_report(games)
     out += creature_size_report(games)
+    out += sacrifice_report(games)
 
     # --- Running out of gas ------------------------------------------------
     out += ["", "## Spells cast per turn (running out of gas?)", "",
