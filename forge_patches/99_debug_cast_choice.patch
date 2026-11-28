@@ -1,8 +1,45 @@
 diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
-index b864bd9f..7ef3bfba 100644
+index b864bd9f..94ee3c18 100644
 --- a/forge-ai/src/main/java/forge/ai/AiController.java
 +++ b/forge-ai/src/main/java/forge/ai/AiController.java
-@@ -3335,6 +3335,25 @@ public class AiController {
+@@ -1869,7 +1869,36 @@ public class AiController {
+      * One "thinking session" per priority: every nested AI step shares the same deadline and gives up
+      * (= the AI passes priority) the moment the timer runs out.
+      */
++    /** mtg-forge-sim patch 99 (TEMPORARY debug): true on this player's own first two turns, in a main phase. */
++    public static boolean simDebugNow(final Game g, final Player p) {
++        return g != null && p != null && g.getPhaseHandler().getTurn() <= 4 && g.getPhaseHandler().isPlayerTurn(p)
++                && g.getPhaseHandler().getPhase() != null && g.getPhaseHandler().getPhase().isMain();
++    }
++
++    /** mtg-forge-sim patch 99 (TEMPORARY debug): one "AiDebug ..." line in the game log (log only). */
++    public static void simDebugLog(final Game g, final Player p, final String what, final String text) {
++        g.fireEvent(new forge.game.event.GameEventAddLog(forge.game.GameLogEntryType.TURN,
++                "AiDebug " + what + " turn=" + g.getPhaseHandler().getTurn() + " phase=" + g.getPhaseHandler().getPhase()
++                + " | " + text + " | player=" + p.getName()));
++    }
++
+     public List<SpellAbility> chooseSpellAbilityToPlay() {
++        final List<SpellAbility> chosenForDebug = chooseSpellAbilityToPlayTimed();
++        if (simDebugNow(game, player) && chosenForDebug != null && !chosenForDebug.isEmpty()) {
++            // mtg-forge-sim patch 99 (TEMPORARY debug, log only): what the AI decided to play now
++            final StringBuilder names = new StringBuilder();
++            for (final SpellAbility s : chosenForDebug) {
++                if (s != null && s.getHostCard() != null) {
++                    names.append(names.length() > 0 ? ", " : "").append(s.getHostCard().getName())
++                            .append(s.isLandAbility() ? " (land)" : "");
++                }
++            }
++            simDebugLog(game, player, "chosen", names.toString());
++        }
++        return chosenForDebug;
++    }
++
++    private List<SpellAbility> chooseSpellAbilityToPlayTimed() {
+         final long id = AITimeoutTracker.key(game.getId(), player.getId());
+         final long timeoutNanos = TimeUnit.SECONDS.toNanos(game.getAITimeout());
+         AITimeoutTracker.begin(id, timeoutNanos);
+@@ -3335,6 +3364,25 @@ public class AiController {
          }
          ComputerUtilAbility.putCastPayoffsFirst(all);
  
@@ -28,7 +65,7 @@ index b864bd9f..7ef3bfba 100644
          // read on this thread, before the evaluation thread starts: the plan is fixed for the whole game
          final ComboPlan combos = deckPlan(player).combos;
          final boolean massReanimation = combos.isMassReanimationDeck(player);
-@@ -3417,6 +3436,13 @@ public class AiController {
+@@ -3417,6 +3465,13 @@ public class AiController {
                      // PhaseHandler ph = game.getPhaseHandler();
                      // System.out.printf("Ai thinks '%s' of %s -> %s @ %s %s >>> \n", opinion, sa.getHostCard(), sa, Lang.getInstance().getPossesive(ph.getPlayerTurn().getName()), ph.getPhase());
  
@@ -42,3 +79,41 @@ index b864bd9f..7ef3bfba 100644
                      if (isFlatMcOnlyPlay(sa)) {
                          // never approved by the heuristics: only a play for the rollouts to weigh, and only with discovery
                          if (extrasOut != null && isLegalDiscovery(sa, opinion)) {
+diff --git a/forge-ai/src/main/java/forge/ai/ComputerUtil.java b/forge-ai/src/main/java/forge/ai/ComputerUtil.java
+index 9294291d..11cf2828 100644
+--- a/forge-ai/src/main/java/forge/ai/ComputerUtil.java
++++ b/forge-ai/src/main/java/forge/ai/ComputerUtil.java
+@@ -85,6 +85,17 @@ public class ComputerUtil {
+     public static boolean handlePlayingSpellAbility(final Player ai, SpellAbility sa, Consumer<SpellAbility> chooseTargets) {
+         final Card source = sa.getHostCard();
+         final Game game = source.getGame();
++        if (sa.isSpell() && source.isCreature() && AiController.simDebugNow(game, ai)) {
++            // mtg-forge-sim patch 99 (TEMPORARY debug, log only): which code path asked to cast this creature
++            final StringBuilder via = new StringBuilder();
++            final StackTraceElement[] st = Thread.currentThread().getStackTrace();
++            for (int i = 2; i < Math.min(st.length, 8); i++) {
++                final String cls = st[i].getClassName();
++                via.append(via.length() > 0 ? " < " : "").append(cls.substring(cls.lastIndexOf('.') + 1))
++                        .append('.').append(st[i].getMethodName());
++            }
++            AiController.simDebugLog(game, ai, "play", "card=" + source.getName() + " | via=" + via);
++        }
+         RunawayLoop.note(ai, sa);
+         if (!sa.isCopied() && !sa.isTrigger() && ai.getController() instanceof PlayerControllerAi pc) {
+             if (pc.getAi().hasFailedToCast(sa)) {
+diff --git a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+index 1d75a6d0..ae64103a 100644
+--- a/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
++++ b/forge-ai/src/main/java/forge/ai/PlayerControllerAi.java
+@@ -1069,6 +1069,11 @@ public class PlayerControllerAi extends PlayerController {
+         final String key = AiController.castKey(sa);
+ 
+         final boolean played = ComputerUtil.handlePlayingSpellAbility(player, sa, chooseTargets);
++        if (!played && sa.isSpell() && AiController.simDebugNow(game, player)) {
++            // mtg-forge-sim patch 99 (TEMPORARY debug, log only)
++            AiController.simDebugLog(game, player, "castfailed", "card=" + sa.getHostCard().getName()
++                    + " | failedBefore=" + getAi().hasFailedToCast(sa));
++        }
+ 
+         if (!sa.isCopied() && !sa.isTrigger() && game.getStack().getIllegalAdditionCount(sa.getHostCard()) > failedBefore) {
+             // MagicStack already refunded the mana and returned the card; remember it so the AI does not pick it again

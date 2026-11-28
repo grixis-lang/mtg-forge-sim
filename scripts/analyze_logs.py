@@ -107,6 +107,9 @@ LIFELOSS = re.compile(r"^Life: LifeLoss turn=(\d+) amount=(\d+) \| source=(.+?) 
 # "Turn: AiDebug order turn=1 phase=MAIN1 | A, B | player=P" / "Turn: AiDebug opinion turn=1 phase=MAIN1 | card=A | opinion=WillPlay | player=P"
 AIDEBUG_ORDER = re.compile(r"^Turn: AiDebug order turn=(\d+) phase=(\S+) \| (.+) \| player=(.+)$")
 AIDEBUG_OPINION = re.compile(r"^Turn: AiDebug opinion turn=(\d+) phase=(\S+) \| card=(.+?) \| opinion=(\S+) \| player=(.+)$")
+# patch 99 v2: "AiDebug chosen ... | A, B (land) | player=P", "AiDebug play ... | card=A | via=X < Y | player=P",
+# "AiDebug castfailed ... | card=A | failedBefore=false | player=P"
+AIDEBUG_OTHER = re.compile(r"^Turn: AiDebug (chosen|play|castfailed) turn=(\d+) phase=(\S+) \| (.+) \| player=(.+)$")
 OUTCOME_TURN = re.compile(r"^Game Outcome: Turn (\d+)")
 OUTCOME_LOST = re.compile(r"^Game Outcome: (.+?) has lost because (.+)$")
 RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has won!")
@@ -308,6 +311,12 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
         if m:
             if is_ours(m.group(5)):
                 g["ai_debug"].append(("opinion", m.group(2), m.group(3).strip(), m.group(4)))
+            continue
+
+        m = AIDEBUG_OTHER.match(line)
+        if m:
+            if is_ours(m.group(5)):
+                g["ai_debug"].append((m.group(1), m.group(3), m.group(4).strip()))
             continue
 
         m = SACRIFICE.match(line)
@@ -718,6 +727,20 @@ def ai_debug_report(games: list[dict]) -> list[str]:
     out += ["", "The AI's answer for each creature spell it checked:", "",
             "| Card | Phase | Answer | Times |", "|---|---|---|---:|"]
     out += [f"| {c} | {ph} | {a} | {k} |" for (c, ph, a), k in sorted(answers.items(), key=lambda kv: (kv[0][0], -kv[1]))]
+    chosen = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "chosen")
+    if chosen:
+        out += ["", "What the AI decided to play (one line per decision; lands marked):", "",
+                "| Phase | Chosen | Times |", "|---|---|---:|"]
+        out += [f"| {ph} | {c} | {k} |" for (ph, c), k in chosen.most_common(20)]
+    plays = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "play")
+    if plays:
+        out += ["", "Creature spells the AI cast, and the code path that asked for it (most recent call first):", "",
+                "| Phase | Card and path | Times |", "|---|---|---:|"]
+        out += [f"| {ph} | {c} | {k} |" for (ph, c), k in plays.most_common(25)]
+    failed = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "castfailed")
+    if failed:
+        out += ["", "Casts that didn't happen:", "", "| Phase | Card | Times |", "|---|---|---:|"]
+        out += [f"| {ph} | {c} | {k} |" for (ph, c), k in failed.most_common(15)]
     out.append("")
     return out
 
