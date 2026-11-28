@@ -1,0 +1,44 @@
+diff --git a/forge-ai/src/main/java/forge/ai/AiController.java b/forge-ai/src/main/java/forge/ai/AiController.java
+index b864bd9f..7ef3bfba 100644
+--- a/forge-ai/src/main/java/forge/ai/AiController.java
++++ b/forge-ai/src/main/java/forge/ai/AiController.java
+@@ -3335,6 +3335,25 @@ public class AiController {
+         }
+         ComputerUtilAbility.putCastPayoffsFirst(all);
+ 
++        // mtg-forge-sim patch 99 (TEMPORARY debug, log only): on each player's first two turns, log the order in
++        // which the AI considers its creature spells, and below its answer for each one it checks.
++        final int simDebugTurn = game.getPhaseHandler().getTurn();
++        final boolean simDebug = simDebugTurn <= 4 && game.getPhaseHandler().isPlayerTurn(player)
++                && game.getPhaseHandler().getPhase().isMain();
++        if (simDebug) {
++            final StringBuilder order = new StringBuilder();
++            for (final SpellAbility s : all) {
++                if (s.getApi() == ApiType.PermanentCreature && s.getHostCard() != null) {
++                    order.append(order.length() > 0 ? ", " : "").append(s.getHostCard().getName());
++                }
++            }
++            if (order.length() > 0) {
++                game.fireEvent(new forge.game.event.GameEventAddLog(forge.game.GameLogEntryType.TURN,
++                        "AiDebug order turn=" + simDebugTurn + " phase=" + game.getPhaseHandler().getPhase()
++                        + " | " + order + " | player=" + player.getName()));
++            }
++        }
++
+         // read on this thread, before the evaluation thread starts: the plan is fixed for the whole game
+         final ComboPlan combos = deckPlan(player).combos;
+         final boolean massReanimation = combos.isMassReanimationDeck(player);
+@@ -3417,6 +3436,13 @@ public class AiController {
+                     // PhaseHandler ph = game.getPhaseHandler();
+                     // System.out.printf("Ai thinks '%s' of %s -> %s @ %s %s >>> \n", opinion, sa.getHostCard(), sa, Lang.getInstance().getPossesive(ph.getPlayerTurn().getName()), ph.getPhase());
+ 
++                    if (simDebug && sa.getApi() == ApiType.PermanentCreature && sa.getHostCard() != null) {
++                        // mtg-forge-sim patch 99 (TEMPORARY debug, log only)
++                        game.fireEvent(new forge.game.event.GameEventAddLog(forge.game.GameLogEntryType.TURN,
++                                "AiDebug opinion turn=" + simDebugTurn + " phase=" + game.getPhaseHandler().getPhase()
++                                + " | card=" + sa.getHostCard().getName() + " | opinion=" + opinion
++                                + " | player=" + player.getName()));
++                    }
+                     if (isFlatMcOnlyPlay(sa)) {
+                         // never approved by the heuristics: only a play for the rollouts to weigh, and only with discovery
+                         if (extrasOut != null && isLegalDiscovery(sa, opinion)) {

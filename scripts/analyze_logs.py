@@ -103,6 +103,10 @@ SACRIFICE = re.compile(r"^Zone Change: Sacrifice turn=(\d+) id=(\d+) creature=(y
                        r"\| card=(.+?) \| cause=(.+?) \| cause_player=(.+?) \| player=(.+)$")
 LIFELOSS = re.compile(r"^Life: LifeLoss turn=(\d+) amount=(\d+) \| source=(.+?) \| source_player=(.+?) "
                       r"\| player=(.+)$")
+# Temporary debug patch 99 (99_debug_cast_choice): the AI's creature-spell order and its answer for each one
+# "Turn: AiDebug order turn=1 phase=MAIN1 | A, B | player=P" / "Turn: AiDebug opinion turn=1 phase=MAIN1 | card=A | opinion=WillPlay | player=P"
+AIDEBUG_ORDER = re.compile(r"^Turn: AiDebug order turn=(\d+) phase=(\S+) \| (.+) \| player=(.+)$")
+AIDEBUG_OPINION = re.compile(r"^Turn: AiDebug opinion turn=(\d+) phase=(\S+) \| card=(.+?) \| opinion=(\S+) \| player=(.+)$")
 OUTCOME_TURN = re.compile(r"^Game Outcome: Turn (\d+)")
 OUTCOME_LOST = re.compile(r"^Game Outcome: (.+?) has lost because (.+)$")
 RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has won!")
@@ -224,6 +228,7 @@ def new_game() -> dict:
         "sacrifices": [],         # {"n", "turn", "id", "card", "creature", "token", "cause", "cause_side", "side"}
         "life_loss": [],          # {"n", "turn", "amount", "source", "source_side", "side"} (not damage)
         "line_no": 0,
+        "ai_debug": [],           # patch 99 (temporary): ("order", phase, text) / ("opinion", phase, card, answer), ours only
     }
 
 
@@ -291,6 +296,18 @@ def parse(log_text: str, ours: str, kinds: dict[str, tuple[str, int]] | None = N
                 g["on_play"] = is_ours(player)         # who took turn 1
             if is_ours(player):
                 g["our_turn_index"] += 1                # our 1st, 2nd, 3rd turn...
+            continue
+
+        m = AIDEBUG_ORDER.match(line)
+        if m:
+            if is_ours(m.group(4)):
+                g["ai_debug"].append(("order", m.group(2), m.group(3).strip()))
+            continue
+
+        m = AIDEBUG_OPINION.match(line)
+        if m:
+            if is_ours(m.group(5)):
+                g["ai_debug"].append(("opinion", m.group(2), m.group(3).strip(), m.group(4)))
             continue
 
         m = SACRIFICE.match(line)
@@ -683,6 +700,24 @@ def turn_one_report(games: list[dict], min_casts: int = 3, min_pair_games: int =
                 "| Card A | Card B | Games | A first | B first | Neither |", "|---|---|---:|---:|---:|---:|"]
         for a, b, n, fa, fb, nn in sorted(rows, key=lambda r: -r[2]):
             out.append(f"| {a} | {b} | {n} | {fa} | {fb} | {nn} |")
+    out.append("")
+    return out
+
+
+def ai_debug_report(games: list[dict]) -> list[str]:
+    """Section (only when temporary Forge patch 99 is on): on our first two turns, the order in which
+    Forge's AI considered our creature spells, and its answer for each one it checked."""
+    if not any(g["ai_debug"] for g in games):
+        return []
+    out = ["", "## AI debug: creature spells considered on our first two turns (temporary patch 99)", ""]
+    orders = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "order")
+    out += ["Order in which the AI looked at our creature spells (most common lists):", "",
+            "| Phase | Order (first one is checked first) | Times |", "|---|---|---:|"]
+    out += [f"| {ph} | {o} | {k} |" for (ph, o), k in orders.most_common(15)]
+    answers = Counter((d[2], d[1], d[3]) for g in games for d in g["ai_debug"] if d[0] == "opinion")
+    out += ["", "The AI's answer for each creature spell it checked:", "",
+            "| Card | Phase | Answer | Times |", "|---|---|---|---:|"]
+    out += [f"| {c} | {ph} | {a} | {k} |" for (c, ph, a), k in sorted(answers.items(), key=lambda kv: (kv[0][0], -kv[1]))]
     out.append("")
     return out
 
@@ -1400,6 +1435,7 @@ def report(games: list[dict], ours: str, opponent: str,
     # --- Cards cast by turn (what we actually did early) ---------------------
     out += cast_by_turn_report(games)
     out += turn_one_report(games)
+    out += ai_debug_report(games)
 
     # --- Biggest threats -----------------------------------------------------
     dmg = Counter()
