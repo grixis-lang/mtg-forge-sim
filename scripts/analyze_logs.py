@@ -109,7 +109,7 @@ AIDEBUG_ORDER = re.compile(r"^Turn: AiDebug order turn=(\d+) phase=(\S+) \| (.+)
 AIDEBUG_OPINION = re.compile(r"^Turn: AiDebug opinion turn=(\d+) phase=(\S+) \| card=(.+?) \| opinion=(\S+) \| player=(.+)$")
 # patch 99 v2: "AiDebug chosen ... | A, B (land) | player=P", "AiDebug play ... | card=A | via=X < Y | player=P",
 # "AiDebug castfailed ... | card=A | failedBefore=false | player=P"
-AIDEBUG_OTHER = re.compile(r"^Turn: AiDebug (chosen|play|castfailed) turn=(\d+) phase=(\S+) \| (.+) \| player=(.+)$")
+AIDEBUG_OTHER = re.compile(r"^Turn: AiDebug (chosen|play|castfailed|canplay) turn=(\d+) phase=(\S+) \| (.+) \| player=(.+)$")
 OUTCOME_TURN = re.compile(r"^Game Outcome: Turn (\d+)")
 OUTCOME_LOST = re.compile(r"^Game Outcome: (.+?) has lost because (.+)$")
 RESULT_WIN = re.compile(r"Game Result: Game (\d+) ended in \d+ ms\. (.+?) has won!")
@@ -737,6 +737,11 @@ def ai_debug_report(games: list[dict]) -> list[str]:
         out += ["", "Creature spells the AI cast, and the code path that asked for it (most recent call first):", "",
                 "| Phase | Card and path | Times |", "|---|---|---:|"]
         out += [f"| {ph} | {c} | {k} |" for (ph, c), k in plays.most_common(25)]
+    canplay = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "canplay")
+    if canplay:
+        out += ["", "Every \"can I play this creature?\" answer and who asked (most recent call first):", "",
+                "| Phase | Card, answer and caller | Times |", "|---|---|---:|"]
+        out += [f"| {ph} | {c} | {k} |" for (ph, c), k in canplay.most_common(40)]
     failed = Counter((d[1], d[2]) for g in games for d in g["ai_debug"] if d[0] == "castfailed")
     if failed:
         out += ["", "Casts that didn't happen:", "", "| Phase | Card | Times |", "|---|---|---:|"]
